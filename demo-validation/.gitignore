@@ -1,0 +1,16 @@
+# 环境与密钥（务必不要提交）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 虚拟环境
+.venv/
+.venv310/
+
+# IDE
+.idea/
+.vscode/

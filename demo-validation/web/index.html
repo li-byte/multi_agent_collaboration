@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>多 Agent 协作 · 通用场景验证</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --panel: #fff; --line: #e3e8ef; --text: #1f2937; --muted: #6b7280;
+    --planner: #4f46e5; --researcher: #0891b2; --executor: #d97706; --reviewer: #e11d48;
+    --ok: #16a34a; --bad: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+         font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+
+  header { height: 52px; background: #111827; color: #f9fafb; padding: 0 16px;
+           display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; white-space: nowrap; }
+  header .pills { display: flex; gap: 7px; overflow: hidden; }
+  .pill { background: #1f2937; border: 1px solid #374151; border-radius: 999px;
+          padding: 2px 10px; font-size: 12px; color: #d1d5db; white-space: nowrap; }
+  .pill b { color: #fff; }
+  .hbtns { margin-left: auto; display: flex; gap: 7px; flex-shrink: 0; }
+  .hbtn { background: #374151; color: #e5e7eb; border: 0; border-radius: 6px;
+          padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .hbtn:hover { background: #4b5563; }
+
+  .layout { display: flex; height: calc(100vh - 52px); }
+  .side { width: 214px; flex: 0 0 214px; background: #fff; border-right: 1px solid var(--line);
+          display: flex; flex-direction: column; }
+  .side h2 { margin: 0; padding: 12px; font-size: 12.5px; color: #374151;
+             border-bottom: 1px solid var(--line); display: flex; align-items: center; }
+  .side h2 .plus { margin-left: auto; cursor: pointer; color: #2563eb; font-weight: 700; font-size: 16px; padding: 0 4px; }
+  .side .list { flex: 1; overflow: auto; padding: 8px; }
+  .sess { padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px;
+          margin-bottom: 7px; cursor: pointer; background: #fff; }
+  .sess:hover { border-color: #93c5fd; background: #f8fafc; }
+  .sess.on { border-color: #2563eb; box-shadow: 0 0 0 2px #dbeafe inset; }
+  .sess .t { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess .m { font-size: 10.5px; color: var(--muted); display: flex; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .chat-scroll { flex: 1; overflow: auto; }
+  .chat { padding: 18px 20px 6px; display: flex; flex-direction: column; gap: 13px;
+          max-width: 1020px; margin: 0 auto; }
+
+  .msg { display: flex; gap: 9px; align-items: flex-start; }
+  .msg.user { justify-content: flex-end; }
+  .msg.sys { justify-content: center; }
+  .avatar { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 9px; color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 700; margin-top: 2px; }
+  .bubble { border-radius: 14px 14px 14px 4px; padding: 9px 13px; font-size: 13.5px;
+            max-width: 820px; min-width: 0; overflow-wrap: anywhere; }
+  .msg.user .bubble { background: #2563eb; color: #fff; border-radius: 14px 14px 4px 14px; }
+  .msg.sys .bubble { background: #eef2f7; color: #64748b; font-size: 12.5px;
+                     border-radius: 999px; padding: 5px 14px; }
+  .msg.agent .bubble { background: #fff; border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+  .msg.agent.veto .bubble { background: #fff7f7; border-color: #fca5a5; }
+  .who { font-size: 12px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .who .en { font-size: 10px; color: #9ca3af; font-family: "Cascadia Mono", Consolas, monospace; font-weight: 400; }
+  .who .tag { font-size: 10.5px; font-weight: 500; color: var(--muted); background: #f3f4f6; border-radius: 999px; padding: 1px 8px; }
+
+  .handoff { display: flex; justify-content: center; padding: 1px 0; }
+  .handoff span { font-size: 11.5px; color: #64748b; background: #f1f5f9;
+                  border: 1px dashed #cbd5e1; border-radius: 999px; padding: 3px 14px; }
+
+  .dots span { display: inline-block; width: 5px; height: 5px; margin-right: 3px;
+               border-radius: 50%; background: #94a3b8; animation: blink 1.2s infinite; }
+  .dots span:nth-child(2) { animation-delay: .2s; } .dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%,60%,100% { opacity: .25 } 30% { opacity: 1 } }
+
+  .claim { border-left: 3px solid #e5e7eb; padding: 4px 9px; margin: 5px 0;
+           background: #fafafa; border-radius: 0 6px 6px 0; }
+  .ghost { font-size: 11px; color: var(--muted); }
+  .as { font-size: 11.5px; color: #b45309; margin-top: 3px; }
+
+  .kv { display: flex; gap: 6px; margin: 3px 0; font-size: 12.5px; }
+  .kv .k { color: var(--muted); min-width: 78px; flex-shrink: 0; }
+  .ac { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; margin-top: 5px; background: #fbfdff; }
+  .ac .id { font-weight: 700; color: var(--ok); }
+  .subtask { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; margin: 4px 0;
+             background: #fbfdff; font-size: 12.5px; }
+  .subtask .id { font-weight: 700; color: var(--planner); }
+
+  .chip { display: inline-block; background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe;
+          border-radius: 999px; padding: 0 7px; font-size: 11px; margin: 2px 3px 0 0; cursor: pointer; }
+  .chip:hover { background: #e0e7ff; }
+  .chip.cite { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+  .chip.cite:hover { background: #d1fae5; }
+
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .b-done { background: #dcfce7; color: #166534; }
+  .b-run { background: #dbeafe; color: #1d4ed8; }
+  .b-fail { background: #fee2e2; color: #991b1b; }
+  .b-候选 { background: #fef3c7; color: #92400e; }
+  .b-已验证 { background: #dcfce7; color: #166534; }
+  .b-冲突 { background: #fee2e2; color: #991b1b; }
+  .b-已否决 { background: #f3f4f6; color: #374151; text-decoration: line-through; }
+
+  details.fold { margin-top: 6px; }
+  details.fold > summary { cursor: pointer; font-size: 11.5px; color: var(--muted); list-style: none;
+    background: #f8fafc; border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; display: inline-block; }
+  details.fold > summary::-webkit-details-marker { display: none; }
+  details.fold[open] > summary { margin-bottom: 5px; }
+
+  .inv { display: flex; gap: 6px; font-size: 12px; padding: 2px 0; border-bottom: 1px dashed #eef0f3; }
+  .inv .mark { font-weight: 700; width: 14px; }
+  .inv.pass .mark { color: var(--ok); } .inv.fail .mark { color: var(--bad); }
+  .inv .d { color: var(--muted); font-size: 11px; }
+
+  .verdict { margin-top: 7px; padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 700; }
+  .verdict.approve { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+  .verdict.veto { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .verdict .why { display: block; font-weight: 400; font-size: 12px; margin-top: 4px; }
+  .reflow { margin-top: 6px; padding: 6px 10px; border-radius: 8px; font-size: 12px;
+            background: #fef2f2; border: 1px dashed var(--bad); color: #991b1b; font-weight: 700; }
+  .reflow .s { font-weight: 400; display: block; margin-top: 2px; }
+
+  .ask-opts { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 9px; }
+  .opt { border: 1px solid #c7d2fe; background: #eef2ff; color: #3730a3; border-radius: 8px;
+         padding: 5px 13px; font-size: 12.5px; cursor: pointer; font-weight: 600; }
+  .opt:hover { background: #e0e7ff; border-color: #818cf8; }
+  .ask-hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+
+  .composer { border-top: 1px solid var(--line); background: #fff; padding: 10px 16px 12px; }
+  .composer .samples { max-width: 1020px; margin: 0 auto 7px; display: flex; gap: 7px;
+                       align-items: center; flex-wrap: wrap; font-size: 11.5px; color: #9ca3af; }
+  .composer .samples .opt { font-size: 11.5px; padding: 3px 10px; }
+  .composer .inner { max-width: 1020px; margin: 0 auto; display: flex; gap: 9px; align-items: flex-end; }
+  textarea { flex: 1; resize: none; border: 1px solid var(--line); border-radius: 10px;
+             padding: 9px 12px; font: inherit; font-size: 13.5px; max-height: 260px; min-height: 40px;
+             outline: none; color: var(--text); }
+  textarea:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px #dbeafe; }
+  textarea.material { border-color: #a7f3d0; box-shadow: 0 0 0 3px #d1fae5; }
+  .send { background: #2563eb; color: #fff; border: 0; border-radius: 10px; padding: 10px 20px;
+          font-size: 13.5px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+  .send:hover { background: #1d4ed8; }
+  .send:disabled { background: #9ca3af; cursor: not-allowed; }
+  .tip { max-width: 1020px; margin: 5px auto 0; font-size: 11px; color: #9ca3af; }
+
+  .drawer { position: fixed; left: 0; right: 0; bottom: 0; background: #111827; color: #e5e7eb;
+            border-top: 2px solid #374151; padding: 12px 16px; max-height: 46vh; overflow: auto;
+            transform: translateY(102%); transition: transform .18s ease; z-index: 30; }
+  .drawer.open { transform: translateY(0); }
+  .drawer h3 { margin: 0 0 6px; font-size: 13px; color: #fff; }
+  .drawer .body { margin-top: 6px; font-size: 13px; line-height: 1.8; white-space: pre-wrap;
+                  word-break: break-word; color: #d1fae5; }
+  .drawer mark { background: #fde68a; color: #111827; border-radius: 3px; padding: 0 2px; }
+  .drawer .close { float: right; cursor: pointer; color: #9ca3af; font-size: 12px; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: none; z-index: 50; padding: 26px; }
+  .overlay.open { display: block; }
+  .win { background: #fff; border-radius: 12px; height: 100%; display: flex; flex-direction: column;
+         overflow: hidden; box-shadow: 0 18px 50px rgba(0,0,0,.35); }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+         border-bottom: 1px solid var(--line); background: #f9fafb; flex-wrap: wrap; }
+  .bar b { font-size: 14px; }
+  .bar .hint { font-size: 12px; color: var(--muted); }
+  .bar .acts { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .mini { background: #fff; color: #374151; border: 1px solid var(--line); border-radius: 6px;
+          padding: 4px 11px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .mini:hover { background: #f3f4f6; }
+  .mini.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  #seq-zoom-label { min-width: 44px; text-align: center; color: var(--muted); }
+  .win-body { flex: 1; overflow: auto; padding: 16px; }
+  #seq-canvas { display: inline-block; min-width: 100%; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); padding-bottom: 10px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 22px; height: 0; border-top: 2px solid #64748b;
+              vertical-align: middle; margin-right: 5px; }
+  .legend i.red { border-top: 2px dashed #dc2626; }
+  .legend i.grn { border-top: 2px solid #16a34a; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #eef0f3; vertical-align: top; }
+  th { color: var(--muted); background: #f9fafb; position: sticky; top: 0; }
+  .empty { color: var(--muted); font-size: 12.5px; text-align: center; padding: 22px 8px; }
+  .chunk { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 9px; background: #fbfdff; }
+  .chunk .hd { font-size: 11.5px; font-weight: 700; color: #047857; margin-bottom: 4px; }
+  .chunk .tx { font-size: 12.5px; white-space: pre-wrap; line-height: 1.75; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>多 Agent 协作 · 通用场景验证</h1>
+  <div class="pills">
+    <span class="pill" id="p-q">问题 <b>—</b></span>
+    <span class="pill" id="p-status">状态 <b>—</b></span>
+    <span class="pill" id="p-ver">版本 <b>—</b></span>
+    <span class="pill" id="p-health">连接中…</span>
+  </div>
+  <div class="hbtns">
+    <button class="hbtn" id="btn-chunks">📄 资料</button>
+    <button class="hbtn" id="btn-seq">📊 时序图</button>
+    <button class="hbtn" id="btn-check">🔍 一致性校验</button>
+    <button class="hbtn" id="btn-ledger">📒 账本</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="side">
+    <h2>会话 <span class="plus" id="btn-new" title="新建会话">＋</span></h2>
+    <div class="list" id="sess-list"><div class="empty">暂无会话</div></div>
+  </aside>
+
+  <main class="main">
+    <div class="chat-scroll" id="chat-scroll">
+      <div class="chat" id="chat"></div>
+    </div>
+    <div class="composer">
+      <div class="samples" id="samples"><span>试试：</span></div>
+      <div class="inner">
+        <textarea id="input" rows="1" placeholder="说说你的问题…（例如：我血压 145/92，需要吃降压药吗？）"></textarea>
+        <button class="send" id="btn-send">发送</button>
+      </div>
+      <div class="tip" id="tip">Enter 发送 · Shift + Enter 换行 · 我的结论必须引用你提供的资料，所以会先问你要资料</div>
+    </div>
+  </main>
+</div>
+
+<div class="drawer" id="drawer">
+  <span class="close" onclick="closeDrawer()">关闭 ✕</span>
+  <h3 id="d-title">资料原文</h3>
+  <div id="d-meta" class="mono" style="color:#9ca3af"></div>
+  <div class="body" id="d-body"></div>
+</div>
+
+<div class="overlay" id="seq-overlay">
+  <div class="win">
+    <div class="bar">
+      <b>协作时序图</b>
+      <span class="hint">对照「谁把什么交给了谁」· 可导出 SVG</span>
+      <div class="acts">
+        <button class="mini" id="seq-zoom-out">−</button>
+        <span class="mono" id="seq-zoom-label">100%</span>
+        <button class="mini" id="seq-zoom-in">+</button>
+        <button class="mini primary" id="seq-export">导出 SVG</button>
+        <button class="mini" id="seq-close">关闭 ✕</button>
+      </div>
+    </div>
+    <div class="win-body" id="seq-body">
+      <div class="legend">
+        <span><i></i>交接（谁把什么交给谁）</span>
+        <span><i class="red"></i>否决回流</span>
+        <span><i class="grn"></i>通过 / 完成</span>
+        <span>▢ 灰框＝该智能体的产出</span>
+        <span>▢ 红绿框＝运行时一致性校验</span>
+      </div>
+      <div id="seq-canvas"></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="info-overlay">
+  <div class="win">
+    <div class="bar">
+      <b id="info-title">详情</b>
+      <span class="hint" id="info-hint"></span>
+      <div class="acts"><button class="mini" id="info-close">关闭 ✕</button></div>
+    </div>
+    <div class="win-body" id="info-body"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const clip = (t, n) => { t = String(t ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+
+const ROLE_CN = { planner: '规划器', researcher: '研究员', executor: '执行器', reviewer: '审查器', system: '系统' };
+const ROLE_FACE = { planner: '规', researcher: '研', executor: '执', reviewer: '审', system: '系' };
+const ROLE_BUSY = { planner: '正在拆解问题…', researcher: '正在读资料…',
+                    executor: '正在汇总答案…', reviewer: '正在核对依据…' };
+const ROLE_COLOR = { planner: '#4f46e5', researcher: '#0891b2', executor: '#d97706',
+                     reviewer: '#e11d48', system: '#64748b' };
+const roleCN = (r) => ROLE_CN[r] || r;
+
+const STATUS_CN = { created: '已创建', planning: '规划中', researching: '查资料中',
+                    answering: '汇总中', reviewing: '审查中', done: '已完成', failed: '失败' };
+const statusCN = (s) => STATUS_CN[s] || s;
+const TASK_STATUS_CN = { completed: '已完成', running: '执行中', pending: '待执行', failed: '失败', unknown: '状态未知' };
+
+const store = {
+  chat: [], blocks: [], folds: {}, citeList: [],
+  question: null, materials: [], awaiting: null,
+  runId: null, runInfo: {}, chunks: {}, events: [], tasks: [],
+  consistency: null, finished: false, es: null, seqZoom: 1, infoMode: null,
+};
+
+/* ---------------- 引用 chip ---------------- */
+function citeChip(c) {
+  const sid = c.source_id || '?', quote = c.quote || '';
+  let i = store.citeList.findIndex((x) => x.source_id === sid && x.quote === quote);
+  if (i < 0) { store.citeList.push({ source_id: sid, quote }); i = store.citeList.length - 1; }
+  return `<span class="chip cite" data-cite="${i}" title="点击查看原文">${esc(sid)}</span>`;
+}
+const citeChips = (cs) => (cs && cs.length) ? cs.map(citeChip).join('') : '<span class="ghost">无依据</span>';
+
+function openCitation(sourceId, quote) {
+  const content = store.chunks[sourceId];
+  $('d-title').textContent = `资料原文 · ${sourceId}`;
+  if (!content) {
+    $('d-meta').textContent = '（本地还没加载这段资料）';
+    $('d-body').innerHTML = '<span style="color:#fca5a5">未找到该资料片段</span>';
+    $('drawer').classList.add('open');
+    return;
+  }
+  let html;
+  const idx = content.indexOf(quote);
+  if (idx >= 0 && quote) {
+    html = esc(content.slice(0, idx)) + '<mark>' + esc(content.slice(idx, idx + quote.length)) +
+           '</mark>' + esc(content.slice(idx + quote.length));
+    $('d-meta').textContent = `引用逐字命中原文（第 ${idx + 1} 字起，共 ${quote.length} 字）`;
+  } else {
+    html = esc(content) + '<div style="color:#fca5a5;margin-top:8px">⚠ 该摘录在原文中未找到</div>';
+    $('d-meta').textContent = '⚠ 与本段原文不匹配';
+  }
+  $('d-body').innerHTML = html;
+  $('drawer').classList.add('open');
+}
+function closeDrawer() { $('drawer').classList.remove('open'); }
+
+document.addEventListener('click', (ev) => {
+  const t = ev.target;
+  const cite = t.dataset && t.dataset.cite;
+  if (cite !== undefined && cite !== '') {
+    const c = store.citeList[Number(cite)];
+    if (c) openCitation(c.source_id, c.quote);
+    return;
+  }
+  const act = t.dataset && t.dataset.act;
+  if (act === 'seq') openSeq();
+  if (act === 'check') openInfo('check');
+  if (act === 'ledger') openInfo('ledger');
+  if (act === 'chunks') openInfo('chunks');
+  if (act === 'sample') runSample(t.dataset.id);
+});
+
+document.addEventListener('toggle', (ev) => {
+  const d = ev.target;
+  if (d && d.tagName === 'DETAILS' && d.dataset.fold) store.folds[d.dataset.fold] = d.open;
+}, true);
+const foldOpen = (key, def) => (key in store.folds ? store.folds[key] : def);
+
+/* ---------------- 健康 / 示例 ---------------- */
+async function loadHealth() {
+  try {
+    const h = await (await fetch('/api/health')).json();
+    $('p-health').innerHTML = `数据库 <b>${h.pg === 'ok' ? '正常' : h.pg}</b> · ${esc(h.llm_mode)}`;
+  } catch (e) { $('p-health').textContent = '服务不可达'; }
+}
+async function loadSamples() {
+  try {
+    const rows = await (await fetch('/api/samples')).json();
+    $('samples').innerHTML = '<span>试试：</span>' + rows.map((s) =>
+      `<span class="opt" data-act="sample" data-id="${esc(s.id)}">${esc(s.label)}</span>`).join('');
+  } catch (e) { /* ignore */ }
+}
+
+/* ---------------- 会话列表 ---------------- */
+async function loadSessions() {
+  try {
+    const rows = await (await fetch('/api/runs')).json();
+    const box = $('sess-list');
+    if (!rows.length) { box.innerHTML = '<div class="empty">暂无会话</div>'; return; }
+    box.innerHTML = rows.map((r) => {
+      const cls = r.status === 'done' ? 'b-done' : (r.status === 'failed' ? 'b-fail' : 'b-run');
+      return `<div class="sess${r.global_task_id === store.runId ? ' on' : ''}" data-id="${esc(r.global_task_id)}">
+        <div class="t">${esc(clip(r.question, 22))}</div>
+        <div class="m"><span class="badge ${cls}">${esc(statusCN(r.status))}</span>
+          <span>资料 ${r.chunk_count} 段</span><span>第 ${r.round + 1} 轮</span></div>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.sess').forEach((el) => { el.onclick = () => openSession(el.dataset.id); });
+  } catch (e) { /* ignore */ }
+}
+
+/* ---------------- 对话项 ---------------- */
+function pushChat(item) { store.chat.push(item); renderChat(); scrollDown(false); return item; }
+
+function ensureBubble(role, round) {
+  const key = `${round}::${role}`;
+  let b = store.blocks.find((x) => x.key === key);
+  if (!b) {
+    b = { kind: 'agent', key, role, round, typing: true, summary: '', findings: [],
+          answer: null, consistency: null, review: null, subTasks: [], planReason: '', attempts: 1 };
+    store.blocks.push(b);
+    store.chat.push(b);
+  }
+  return b;
+}
+
+function scrollDown(force) {
+  const box = $('chat-scroll');
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
+  if (force || nearBottom) requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+}
+
+/* ---------------- 事件 → 对话 ---------------- */
+function handleEvent(e) {
+  store.events.push(e);
+  const p = e.payload || {};
+  const role = e.role, round = e.round ?? 0;
+
+  switch (e.event_type) {
+    case 'run_created':
+      store.runInfo = Object.assign(store.runInfo, {
+        question: p.question, status: 'created', version: 0, round: 0,
+        chunk_count: p.chunk_count,
+      });
+      pushChat({ kind: 'sys', text: `已收到资料 ${p.chunk_count} 段，开始协作` });
+      break;
+    case 'node_start':
+      ensureBubble(role, round).note = p.note || '';
+      break;
+    case 'node_end': {
+      const b = ensureBubble(role, round);
+      b.typing = false;
+      b.summary = p.summary || '';
+      if (p.plan_reason) b.planReason = p.plan_reason;
+      if (p.sub_tasks) b.subTasks = p.sub_tasks;
+      if (p.attempts) b.attempts = p.attempts;
+      break;
+    }
+    case 'finding': ensureBubble(role, round).findings.push(p); break;
+    case 'answer': ensureBubble(role, round).answer = p; break;
+    case 'consistency':
+      ensureBubble(role, round).consistency = p;
+      store.consistency = p;
+      break;
+    case 'review': {
+      const b = ensureBubble(role, round);
+      b.review = p;
+      store.runInfo.version = p.version_after ?? store.runInfo.version;
+      store.runInfo.round = p.round_after ?? store.runInfo.round;
+      break;
+    }
+    case 'handoff':
+      ensureBubble(role, round).handoff = p;
+      pushChat({ kind: 'handoff', text: `${roleCN(p.from)} → ${roleCN(p.to)}：${p.label || '交接工作状态'}` });
+      break;
+    case 'done':
+      store.finished = true;
+      store.runInfo.status = p.status;
+      store.runInfo.version = p.version ?? store.runInfo.version;
+      store.runInfo.round = p.round ?? store.runInfo.round;
+      pushChat({ kind: 'sys', done: true, text:
+        `${p.status === 'done' ? '完成' : '结束（未通过）'} · 共 ${(p.round ?? 0) + 1} 轮 · ${p.reason || ''}` });
+      refreshDetail();
+      loadSessions();
+      break;
+    case 'error':
+      pushChat({ kind: 'sys', bad: true, text: `出错了：${clip(p.message, 120)}` });
+      break;
+  }
+  render();
+}
+
+/* ---------------- 渲染 ---------------- */
+function renderHeader() {
+  $('p-q').innerHTML = `问题 <b>${esc(clip(store.runInfo.question || store.question || '—', 18))}</b>`;
+  $('p-status').innerHTML = `状态 <b>${esc(statusCN(store.runInfo.status) || '—')}</b>`;
+  $('p-ver').innerHTML = `版本 <b>${esc(store.runInfo.version ?? '—')}</b> · 第 <b>${esc((store.runInfo.round ?? 0) + 1)}</b> 轮`;
+}
+
+function renderAgentBubble(b) {
+  const out = [];
+  out.push(`<div class="msg agent ${b.review && b.review.decision === 'veto' ? 'veto' : ''}">`);
+  out.push(`<div class="avatar" style="background:${ROLE_COLOR[b.role]}">${ROLE_FACE[b.role]}</div>`);
+  out.push(`<div class="bubble">`);
+  out.push(`<div class="who" style="color:${ROLE_COLOR[b.role]}">${esc(roleCN(b.role))}
+    <span class="en">${esc(b.role)}</span>
+    ${b.round > 0 ? `<span class="tag">第 ${b.round + 1} 轮</span>` : ''}</div>`);
+
+  const has = b.planReason || b.subTasks.length || b.findings.length || b.answer ||
+              b.consistency || b.review || b.summary;
+  if (!has && b.typing) {
+    out.push(`<div class="dots"><span></span><span></span><span></span>
+      <span style="background:none;color:#94a3b8;font-size:12px;margin-left:4px">${esc(ROLE_BUSY[b.role] || '处理中…')}</span></div></div></div>`);
+    return out.join('');
+  }
+
+  if (b.note) out.push(`<div class="as">${esc(b.note)}</div>`);
+
+  if (b.role === 'planner') {
+    if (b.planReason) out.push(`<div>${esc(b.planReason)}</div>`);
+    b.subTasks.forEach((t) => {
+      out.push(`<div class="subtask"><div><span class="id">${esc(t.sub_task_id)}</span> ${esc(t.question)}</div>
+        <div class="ghost">${esc(t.why || '')}${(t.depends_on || []).length ? ` ｜ 依赖 ${esc(t.depends_on.join('、'))}` : ''}</div></div>`);
+    });
+  }
+
+  if (b.role === 'researcher') {
+    b.findings.forEach((f) => {
+      const ins = f.insufficient;
+      out.push(`<div class="claim"${ins ? ' style="border-left-color:#fcd34d"' : ''}>
+        <div><span class="badge b-${esc(f.status)}">${esc(f.status)}</span>
+          <span class="ghost">[${esc(f.sub_task_id)}]</span> ${esc(f.claim)}
+          ${ins ? '<span class="badge b-候选">资料不足</span>' : ''}</div>
+        <div>${ins ? '' : citeChips(f.citations)}</div></div>`);
+    });
+    const as = [];
+    b.findings.forEach((f) => (f.assumptions || []).forEach((a) => as.push(a)));
+    if (as.length) {
+      const k = `${b.key}::as`;
+      out.push(`<details class="fold" data-fold="${esc(k)}" ${foldOpen(k, false) ? 'open' : ''}>
+        <summary>仍在猜的 ${as.length} 条</summary>${as.map((a) => `<div class="as">· ${esc(a)}</div>`).join('')}</details>`);
+    }
+  }
+
+  if (b.role === 'executor' && b.answer) {
+    const a = b.answer;
+    out.push(`<div style="font-size:14px;font-weight:600;margin-bottom:6px">${esc(a.summary)}</div>`);
+    (a.points || []).forEach((p) => {
+      const ins = p.insufficient;
+      out.push(`<div class="claim"${ins ? ' style="border-left-color:#fcd34d"' : ''}>
+        <div><span class="ghost">[${esc(p.sub_task_id)}]</span> ${esc(p.statement)}
+          ${ins ? '<span class="badge b-候选">资料不足</span>' : ''}</div>
+        <div>${ins ? '' : citeChips(p.citations)}</div></div>`);
+    });
+    const k = `${b.key}::ac`;
+    out.push(`<details class="fold" data-fold="${esc(k)}" ${foldOpen(k, false) ? 'open' : ''}>
+      <summary>验收条件 ${(a.acceptance || []).length} 条 · 建议 ${(a.recommendations || []).length} 条</summary>`);
+    (a.acceptance || []).forEach((ac) => {
+      out.push(`<div class="ac"><div><span class="id">${esc(ac.item_id)}</span> ${esc(ac.statement)}</div>
+        <div>${citeChips(ac.citations)}</div></div>`);
+    });
+    (a.recommendations || []).forEach((r) => out.push(`<div class="ghost" style="margin-top:4px">建议：${esc(r)}</div>`));
+    if ((a.caveats || []).length) {
+      out.push(`<div class="as" style="margin-top:6px">资料不足 / 有争议：${esc(a.caveats.join('；'))}</div>`);
+    }
+    out.push(`</details>`);
+  }
+
+  if (b.role === 'reviewer') {
+    if (b.consistency) {
+      const fails = (b.consistency.results || []).filter((r) => r.result === 'fail');
+      const k = `${b.key}::inv`;
+      out.push(`<details class="fold" data-fold="${esc(k)}" ${foldOpen(k, fails.length > 0) ? 'open' : ''}>
+        <summary>运行时一致性校验 · ${b.consistency.passed ? '8 条全部通过' : `${fails.length} 条失败`}</summary>`);
+      (b.consistency.results || []).forEach((r) => {
+        out.push(`<div class="inv ${esc(r.result)}"><span class="mark">${r.result === 'pass' ? '✓' : '✕'}</span>
+          <span><b>${esc(r.invariant_id)}</b> ${esc(r.title)}<div class="d">${esc(r.detail)}</div></span></div>`);
+      });
+      out.push(`</details>`);
+    }
+    if (b.review) {
+      const rv = b.review, approve = rv.decision === 'approve';
+      out.push(`<div class="verdict ${approve ? 'approve' : 'veto'}">
+        ${approve ? '✓ 通过' : '✕ 不通过'}
+        ${rv.forced_by_runtime ? '<span class="badge b-fail" style="margin-left:6px">运行时强制否决</span>' : ''}
+        <span class="why">${esc(rv.reason)}</span>
+        ${(rv.blockers || []).length ? `<span class="why"><b>阻塞点：</b>${rv.blockers.map(esc).join('｜')}</span>` : ''}</div>`);
+      if (!approve) {
+        out.push(`<div class="reflow">↺ 退回${esc(roleCN(rv.rework_target || 'researcher'))}
+          · 版本 ${esc(rv.version_before)} → ${esc(rv.version_after)} · 进入第 ${esc((rv.round_after ?? 0) + 1)} 轮
+          <span class="s">否决改变了后续路由，所以它是系统动作，不是一条评论。</span></div>`);
+      }
+    }
+  }
+
+  if (b.summary && !b.review) out.push(`<div class="ghost" style="margin-top:6px">${esc(b.summary)}</div>`);
+  if (b.attempts > 1) out.push(`<div class="as">本步骤重试过：第 ${b.attempts} 次尝试（见账本）</div>`);
+  if (b.typing) out.push(`<div class="dots" style="margin-top:5px"><span></span><span></span><span></span></div>`);
+  out.push(`</div></div>`);
+  return out.join('');
+}
+
+function renderChat() {
+  store.citeList = [];
+  const box = $('chat');
+  if (!store.chat.length) {
+    box.innerHTML = `<div class="empty">
+      说一句话就能开始 —— 比如「我血压 145/92，需要吃降压药吗？」<br>
+      我的结论必须引用你提供的资料，所以会先问你要资料；健康、代码、任何行业都行。
+    </div>`;
+    return;
+  }
+  box.innerHTML = store.chat.map((it) => {
+    if (it.kind === 'user') {
+      if (it.chars && it.chars > 220) {
+        return `<div class="msg user"><div class="bubble" style="max-width:640px">
+          <details><summary style="cursor:pointer;font-size:12.5px">📄 资料已提供（${it.chars} 字，点击展开）</summary>
+          <div style="margin-top:6px;white-space:pre-wrap;font-size:12.5px;line-height:1.7">${esc(it.full || '')}</div>
+          </details></div></div>`;
+      }
+      return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
+    }
+    if (it.kind === 'handoff') return `<div class="handoff"><span>${esc(it.text)}</span></div>`;
+    if (it.kind === 'ask') {
+      return `<div class="msg agent"><div class="avatar" style="background:#64748b">系</div>
+        <div class="bubble"><div class="who" style="color:#64748b">${esc(it.title || '需要补充资料')}</div>
+          <div>${esc(it.text)}</div>
+          ${(it.options || []).length ? `<div class="ask-opts">${it.options.map((o) =>
+            `<span class="opt" data-act="${esc(o.act)}" data-id="${esc(o.id || '')}">${esc(o.label)}</span>`).join('')}</div>` : ''}
+          ${it.hint ? `<div class="ask-hint">${esc(it.hint)}</div>` : ''}
+        </div></div>`;
+    }
+    if (it.kind === 'sys') {
+      const extra = it.done ? `<div style="margin-top:8px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <span class="opt" data-act="seq">查看时序图</span>
+          <span class="opt" data-act="check">一致性校验</span>
+          <span class="opt" data-act="chunks">资料原文</span>
+          <span class="opt" data-act="ledger">账本</span></div>` : '';
+      return `<div class="msg sys"><div class="bubble" style="${it.bad ? 'background:#fee2e2;color:#991b1b' : ''}">${esc(it.text)}${extra}</div></div>`;
+    }
+    return renderAgentBubble(it);
+  }).join('');
+}
+
+function render() {
+  renderHeader();
+  renderChat();
+  if ($('seq-overlay').classList.contains('open')) renderSequence();
+  if ($('info-overlay').classList.contains('open')) renderInfo();
+}
+
+/* ---------------- 输入与建单 ---------------- */
+function updateComposer() {
+  const box = $('input');
+  if (store.awaiting === 'material') {
+    box.classList.add('material');
+    box.placeholder = '把资料原文贴进来…（可粘贴很长，任何行业都行）';
+    box.rows = 6;
+    box.style.height = '150px';
+    $('tip').textContent = '现在处于「补资料」状态：直接粘贴原文即可。系统只会引用你给的资料，不会自己编。';
+  } else {
+    box.classList.remove('material');
+    box.placeholder = '说说你的问题…（例如：我血压 145/92，需要吃降压药吗？）';
+    $('tip').textContent = 'Enter 发送 · Shift + Enter 换行 · 我的结论必须引用你提供的资料，所以会先问你要资料';
+  }
+}
+
+async function onSend() {
+  const box = $('input');
+  const text = box.value.trim();
+  if (!text) return;
+  if (store.finished) newSession();
+
+  box.value = '';
+  box.style.height = 'auto';
+
+  if (!store.question) {
+    store.question = text;
+    pushChat({ kind: 'user', text });
+    store.awaiting = 'material';
+    pushChat({
+      kind: 'ask', title: '需要补充资料',
+      text: '我的结论必须引用你提供的资料 —— 请把相关的原文贴进来。任何行业都行（健康、代码、法律…），系统只引用你给的资料，不会自己编。',
+      options: [], hint: '把资料粘贴到下面的输入框，然后发送。',
+    });
+    updateComposer();
+    box.focus();
+    return;
+  }
+
+  if (store.awaiting === 'material') {
+    store.materials.push(text);
+    pushChat({ kind: 'user', text: '', chars: text.length, full: text });
+    store.awaiting = null;
+    updateComposer();
+    await createAndStart();
+    return;
+  }
+
+  pushChat({ kind: 'sys', text: '这次会话已经结束了，输入新问题会开一个新会话。' });
+}
+
+async function createAndStart() {
+  const btn = $('btn-send');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/runs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: store.question, materials: store.materials }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      pushChat({ kind: 'sys', bad: true, text: `建任务失败：${(err.detail && err.detail.message) || resp.status}` });
+      return;
+    }
+    const created = await resp.json();
+    store.runId = created.global_task_id;
+    store.runInfo = { question: store.question, status: 'created', version: 0, round: 0,
+                      chunk_count: created.chunk_count };
+    await ensureChunks();
+    renderHeader();
+    loadSessions();
+    openStream(store.runId);
+    await fetch(`/api/runs/${store.runId}/start`, { method: 'POST' });
+  } catch (e) {
+    pushChat({ kind: 'sys', bad: true, text: `启动失败：${e}` });
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runSample(id) {
+  const s = await (await fetch(`/api/samples/${id}`)).json();
+  if (store.finished) newSession();
+  store.question = s.question;
+  store.materials = [s.material];
+  store.awaiting = null;
+  pushChat({ kind: 'user', text: s.question });
+  pushChat({ kind: 'user', text: '', chars: s.material.length, full: s.material });
+  updateComposer();
+  await createAndStart();
+}
+
+/* ---------------- 会话 ---------------- */
+function newSession() {
+  if (store.es) { store.es.close(); store.es = null; }
+  store.chat = []; store.blocks = []; store.folds = {}; store.citeList = [];
+  store.question = null; store.materials = []; store.awaiting = null;
+  store.runId = null; store.runInfo = {}; store.chunks = {};
+  store.events = []; store.tasks = []; store.consistency = null; store.finished = false;
+  updateComposer();
+  render();
+}
+
+async function ensureChunks() {
+  if (!store.runId) return;
+  if (Object.keys(store.chunks).length) return;
+  try {
+    const d = await (await fetch(`/api/runs/${store.runId}`)).json();
+    d.chunks.forEach((c) => { store.chunks[c.chunk_id] = c.content; });
+  } catch (e) { /* ignore */ }
+}
+
+async function openSession(runId) {
+  if (store.es) { store.es.close(); store.es = null; }
+  newSession();
+  store.runId = runId;
+  try {
+    const d = await (await fetch(`/api/runs/${runId}`)).json();
+    store.runInfo = Object.assign({}, d.run);
+    store.question = d.run.question;
+    d.chunks.forEach((c) => { store.chunks[c.chunk_id] = c.content; });
+    store.tasks = d.tasks || [];
+    store.chat.push({ kind: 'user', text: d.run.question });
+    if (d.chunks.length) {
+      const total = d.chunks.reduce((n, c) => n + c.char_len, 0);
+      store.chat.push({ kind: 'user', text: '', chars: total,
+                        full: d.chunks.map((c) => `【${c.chunk_id}】${c.content}`).join('\n\n') });
+    }
+    (d.events || []).forEach(handleEvent);
+    render();
+    await loadSessions();
+    if (!['done', 'failed'].includes(store.runInfo.status)) openStream(runId);
+  } catch (e) {
+    pushChat({ kind: 'sys', bad: true, text: `加载失败：${e}` });
+  }
+}
+
+async function refreshDetail() {
+  if (!store.runId) return;
+  try {
+    const d = await (await fetch(`/api/runs/${store.runId}`)).json();
+    store.tasks = d.tasks || [];
+    d.chunks.forEach((c) => { store.chunks[c.chunk_id] = c.content; });
+    if ($('info-overlay').classList.contains('open')) renderInfo();
+  } catch (e) { /* ignore */ }
+}
+
+/* ---------------- SSE ---------------- */
+function openStream(runId) {
+  if (store.es) store.es.close();
+  const es = new EventSource(`/api/runs/${runId}/stream`);
+  store.es = es;
+  ['run_created', 'node_start', 'node_end', 'handoff', 'finding', 'answer',
+   'consistency', 'review', 'status', 'done', 'error'].forEach((t) => {
+    es.addEventListener(t, (ev) => {
+      try { handleEvent(JSON.parse(ev.data)); } catch (e) { console.error(e); }
+      if (t === 'done') { store.finished = true; es.close(); store.es = null; loadSessions(); }
+    });
+  });
+  es.onerror = () => { if (store.finished) { es.close(); store.es = null; } };
+}
+
+/* ================================================================
+   时序图
+   ================================================================ */
+const SEQ_P = [
+  { key: 'user', cn: '用户' }, { key: 'planner', cn: '规划器' },
+  { key: 'researcher', cn: '研究员' }, { key: 'executor', cn: '执行器' },
+  { key: 'reviewer', cn: '审查器' },
+];
+const SEQ_IDX = { user: 0, planner: 1, researcher: 2, executor: 3, reviewer: 4 };
+const SEQ_HEAD = ['#334155', '#4f46e5', '#0891b2', '#d97706', '#e11d48'];
+
+function buildSequence() {
+  const steps = [];
+  let lastRound = null;
+  for (const e of store.events) {
+    const p = e.payload || {}, r = e.round ?? 0;
+
+    if (e.event_type === 'run_created') {
+      steps.push({ kind: 'band', label: clip(p.question || '开始', 56) });
+      lastRound = 0;
+      steps.push({ kind: 'msg', from: 0, to: 1, tone: 'ok', main: '提交问题 + 资料',
+                   sub: `资料 ${p.chunk_count} 段` });
+      continue;
+    }
+    if (e.event_type === 'node_start' && r !== lastRound) {
+      steps.push({ kind: 'band', label: `第 ${r + 1} 轮` });
+      lastRound = r;
+    }
+    switch (e.event_type) {
+      case 'handoff':
+        steps.push({ kind: 'msg', from: SEQ_IDX[p.from] ?? 1, to: SEQ_IDX[p.to] ?? 1,
+                     main: p.label || '交接工作状态' });
+        break;
+      case 'consistency': {
+        const fails = (p.results || []).filter((x) => x.result === 'fail')
+                                      .map((x) => String(x.invariant_id).split('_')[0]);
+        steps.push({ kind: 'note', who: 4, tone: p.passed ? 'ok' : 'bad',
+                     label: p.passed ? '运行时校验：8 条不变量全部通过' : `运行时校验：${fails.join('、')} 失败` });
+        break;
+      }
+      case 'review':
+        if (p.decision === 'veto') {
+          steps.push({ kind: 'msg', from: 4, to: SEQ_IDX[p.rework_target] ?? 2, tone: 'veto',
+                       main: `✕ 否决：${clip(p.blockers?.[0] || p.reason || '', 30)}`,
+                       sub: `回流 · 版本 ${p.version_before} → ${p.version_after}` +
+                            (p.forced_by_runtime ? ' · 运行时强制否决' : ' · 模型判断') });
+        } else {
+          steps.push({ kind: 'msg', from: 4, to: 0, tone: 'ok',
+                       main: '✓ 通过：结论都有原文依据',
+                       sub: `版本 ${p.version_after} · 一致性校验全部通过` });
+        }
+        break;
+      case 'node_end':
+        if (e.role !== 'reviewer' && p.summary) {
+          steps.push({ kind: 'note', who: SEQ_IDX[e.role] ?? 1, label: p.summary });
+        }
+        break;
+    }
+  }
+  return steps;
+}
+
+function renderSequence() {
+  const host = $('seq-canvas');
+  const steps = buildSequence();
+  if (!steps.length) { host.innerHTML = '<div class="empty">还没有事件，先开始一次协作。</div>'; return; }
+
+  const W = Math.max(1020, ($('seq-body').clientWidth || 1020) - 40);
+  const padX = 130;
+  const colW = (W - padX * 2) / (SEQ_P.length - 1);
+  const X = (i) => padX + colW * i;
+  const HEAD_TOP = 16, HEAD_H = 42, GAP = 30;
+  const ROW = { band: 44, msg: 64, note: 48 };
+  let y = HEAD_TOP + HEAD_H + GAP;
+  const laid = steps.map((s) => { const at = y; y += ROW[s.kind] || 58; return { s, y: at }; });
+  const H = y + 30;
+
+  const out = [];
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W * store.seqZoom}" height="${H * store.seqZoom}" font-family="Microsoft YaHei, Segoe UI, sans-serif">`);
+  out.push(`<defs>
+    <marker id="ah" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+    <marker id="ah-red" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <marker id="ah-green" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
+  </defs>`);
+
+  SEQ_P.forEach((p, i) => {
+    out.push(`<rect x="${X(i) - 57}" y="${HEAD_TOP}" width="114" height="${HEAD_H}" rx="9" fill="${SEQ_HEAD[i]}"/>`);
+    out.push(`<text x="${X(i)}" y="${HEAD_TOP + 19}" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">${esc(p.cn)}</text>`);
+    out.push(`<text x="${X(i)}" y="${HEAD_TOP + 34}" text-anchor="middle" font-size="10" fill="#fff" opacity="0.75" font-family="Consolas, monospace">${esc(p.key)}</text>`);
+    out.push(`<line x1="${X(i)}" y1="${HEAD_TOP + HEAD_H}" x2="${X(i)}" y2="${H - 18}" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="6 6"/>`);
+  });
+
+  laid.forEach(({ s, y }) => {
+    if (s.kind === 'band') {
+      out.push(`<rect x="6" y="${y}" width="${W - 12}" height="26" rx="6" fill="#eef2f7"/>`);
+      out.push(`<text x="${W / 2}" y="${y + 18}" text-anchor="middle" font-size="12" font-weight="700" fill="#64748b">${esc(clip(s.label, 62))}</text>`);
+      return;
+    }
+    if (s.kind === 'note') {
+      const bw = 330, toRight = s.who < SEQ_P.length - 1;
+      const bx = toRight ? X(s.who) + 14 : X(s.who) - 14 - bw;
+      const pal = s.tone === 'bad' ? ['#fef2f2', '#fca5a5', '#991b1b']
+                : s.tone === 'ok' ? ['#f0fdf4', '#86efac', '#166534']
+                : ['#f8fafc', '#e2e8f0', '#475569'];
+      out.push(`<rect x="${bx}" y="${y - 7}" width="${bw}" height="30" rx="6" fill="${pal[0]}" stroke="${pal[1]}"/>`);
+      out.push(`<text x="${toRight ? bx + 10 : bx + bw - 10}" y="${y + 13}" text-anchor="${toRight ? 'start' : 'end'}" font-size="12" fill="${pal[2]}">${esc(clip(s.label, 34))}</text>`);
+      return;
+    }
+    const x1 = X(s.from), x2 = X(s.to);
+    const tone = s.tone || (x2 < x1 ? 'veto' : 'norm');
+    const stroke = tone === 'veto' ? '#dc2626' : tone === 'ok' ? '#16a34a' : '#64748b';
+    const marker = tone === 'veto' ? 'ah-red' : tone === 'ok' ? 'ah-green' : 'ah';
+    const dash = tone === 'veto' ? ' stroke-dasharray="8 5"' : '';
+    const dir = x2 >= x1 ? 1 : -1;
+    out.push(`<line x1="${x1}" y1="${y}" x2="${x2 - dir * 7}" y2="${y}" stroke="${stroke}" stroke-width="2" marker-end="url(#${marker})"${dash}/>`);
+    const cx = (x1 + x2) / 2, main = clip(s.main, 40);
+    const mw = main.length * 7.6 + 14;
+    out.push(`<rect x="${cx - mw / 2}" y="${y - 20}" width="${mw}" height="19" rx="4" fill="#fff" fill-opacity="0.95"/>`);
+    out.push(`<text x="${cx}" y="${y - 6}" text-anchor="middle" font-size="12.5" font-weight="600" fill="${stroke}">${esc(main)}</text>`);
+    if (s.sub) {
+      const sub = clip(s.sub, 46), sw = sub.length * 6.6 + 12;
+      out.push(`<rect x="${cx - sw / 2}" y="${y + 6}" width="${sw}" height="16" rx="4" fill="#fff" fill-opacity="0.95"/>`);
+      out.push(`<text x="${cx}" y="${y + 18}" text-anchor="middle" font-size="11" fill="#94a3b8">${esc(sub)}</text>`);
+    }
+  });
+  out.push('</svg>');
+  host.innerHTML = out.join('');
+}
+
+/* ---------------- 覆盖层 ---------------- */
+function openSeq() { $('seq-overlay').classList.add('open'); renderSequence(); }
+function closeSeq() { $('seq-overlay').classList.remove('open'); }
+function setSeqZoom(z) {
+  store.seqZoom = Math.min(2.2, Math.max(0.5, Math.round(z * 10) / 10));
+  $('seq-zoom-label').textContent = Math.round(store.seqZoom * 100) + '%';
+  renderSequence();
+}
+function exportSeq() {
+  const svg = $('seq-canvas').querySelector('svg');
+  if (!svg) { alert('还没有时序图可导出'); return; }
+  const clone = svg.cloneNode(true);
+  const vb = svg.getAttribute('viewBox').split(' ');
+  clone.setAttribute('width', vb[2]); clone.setAttribute('height', vb[3]);
+  const blob = new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n` + clone.outerHTML],
+                        { type: 'image/svg+xml;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '协作时序图.svg';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function renderInfo() {
+  if (store.infoMode === 'chunks') {
+    const keys = Object.keys(store.chunks);
+    $('info-title').textContent = '用户提供的资料';
+    $('info-hint').textContent = '权威事实层：智能体只能引用这些原文，引用必须逐字命中';
+    if (!keys.length) { $('info-body').innerHTML = '<div class="empty">还没有资料</div>'; return; }
+    $('info-body').innerHTML = keys.sort().map((k) =>
+      `<div class="chunk"><div class="hd">【${esc(k)}】</div><div class="tx">${esc(store.chunks[k])}</div></div>`).join('');
+    return;
+  }
+  if (store.infoMode === 'check') {
+    $('info-title').textContent = '运行时一致性校验';
+    $('info-hint').textContent = '模型负责判断，运行时负责证明 —— 8 条不变量都是确定性推导的';
+    const c = store.consistency;
+    if (!c) { $('info-body').innerHTML = '<div class="empty">还没有跑过校验</div>'; return; }
+    let html = `<div class="verdict ${c.passed ? 'approve' : 'veto'}" style="margin-bottom:12px">
+      ${c.passed ? '✓ 全部不变量通过' : '✕ 存在不变量失败'}</div><table><thead><tr>
+      <th style="width:44px">结果</th><th style="width:250px">不变量</th><th>说明</th></tr></thead><tbody>`;
+    (c.results || []).forEach((r) => {
+      html += `<tr><td style="color:${r.result === 'pass' ? '#16a34a' : '#dc2626'};font-weight:700">${r.result === 'pass' ? '✓' : '✕'}</td>
+        <td><b>${esc(r.invariant_id)}</b><div class="ghost">${esc(r.title)}</div></td>
+        <td>${esc(r.detail)}${(r.offenders || []).length ? `<div class="ghost">涉及：${esc(r.offenders.join('、'))}</div>` : ''}</td></tr>`;
+    });
+    $('info-body').innerHTML = html + '</tbody></table>';
+    return;
+  }
+  $('info-title').textContent = '执行账本';
+  $('info-hint').textContent = '谁在做 / 做到哪一步 / 基于哪些资料 / 试过几次';
+  if (!store.tasks.length) { $('info-body').innerHTML = '<div class="empty">暂无执行记录</div>'; return; }
+  let html = `<table><thead><tr><th>智能体 / 子任务</th><th style="width:60px">第几次</th>
+    <th style="width:80px">状态</th><th style="width:60px">版本</th><th>幂等键 / 租约</th></tr></thead><tbody>`;
+  store.tasks.forEach((t) => {
+    const cls = t.status === 'completed' ? 'b-done' : (t.status === 'failed' ? 'b-fail' : 'b-run');
+    html += `<tr><td><b>${esc(roleCN(t.role))}</b><div class="mono">${esc(t.sub_task_id)}</div></td>
+      <td>${esc(t.attempt)}</td><td><span class="badge ${cls}">${esc(TASK_STATUS_CN[t.status] || t.status)}</span></td>
+      <td>${esc(t.version)}</td>
+      <td class="mono">${esc((t.idempotency_key || '').split(':').slice(-2).join(':'))}
+        <div class="ghost">${t.lease_until ? '租约→' + esc(String(t.lease_until).slice(11, 19)) : '租约已释放'}</div></td></tr>`;
+  });
+  $('info-body').innerHTML = html + '</tbody></table>';
+}
+function openInfo(mode) {
+  store.infoMode = mode;
+  $('info-overlay').classList.add('open');
+  if (mode === 'chunks') ensureChunks().then(renderInfo);
+  else renderInfo();
+}
+function closeInfo() { $('info-overlay').classList.remove('open'); }
+
+/* ---------------- 绑定 ---------------- */
+$('btn-send').onclick = onSend;
+$('input').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); onSend(); }
+});
+$('input').addEventListener('input', (ev) => {
+  if (store.awaiting === 'material') return;
+  ev.target.style.height = 'auto';
+  ev.target.style.height = Math.min(260, ev.target.scrollHeight) + 'px';
+});
+$('btn-new').onclick = () => { newSession(); $('input').focus(); };
+$('btn-chunks').onclick = () => openInfo('chunks');
+$('btn-seq').onclick = openSeq;
+$('btn-check').onclick = () => openInfo('check');
+$('btn-ledger').onclick = () => openInfo('ledger');
+$('seq-close').onclick = closeSeq;
+$('info-close').onclick = closeInfo;
+$('seq-export').onclick = exportSeq;
+$('seq-zoom-in').onclick = () => setSeqZoom(store.seqZoom + 0.1);
+$('seq-zoom-out').onclick = () => setSeqZoom(store.seqZoom - 0.1);
+$('seq-overlay').onclick = (ev) => { if (ev.target === $('seq-overlay')) closeSeq(); };
+$('info-overlay').onclick = (ev) => { if (ev.target === $('info-overlay')) closeInfo(); };
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') { closeSeq(); closeInfo(); }
+  if (ev.key === 'g' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); openSeq(); }
+});
+
+(async function init() {
+  await loadHealth();
+  await loadSamples();
+  await loadSessions();
+  updateComposer();
+  render();
+  $('input').focus();
+})();
+</script>
+</body>
+</html>

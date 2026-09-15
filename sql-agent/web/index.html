@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>sql-agent · 多智能体自然语言转 SQL</title>
+<style>
+  :root { --bg:#f5f7fa; --line:#e3e8ef; --text:#1f2937; --muted:#6b7280;
+          --planner:#4f46e5; --generator:#0891b2; --validator:#7c3aed; --executor:#d97706;
+          --fixer:#db2777; --reviewer:#e11d48; --router:#64748b;
+          --ok:#16a34a; --bad:#dc2626; --warn:#d97706; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); overflow:hidden;
+         font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  .mono { font-family:"Cascadia Mono",Consolas,monospace; font-size:12px; }
+
+  header { height:54px; background:#111827; color:#f9fafb; padding:0 16px;
+           display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:14px; margin:0; font-weight:600; white-space:nowrap; }
+  header .pills { display:flex; gap:7px; overflow:hidden; }
+  .pill { background:#1f2937; border:1px solid #374151; border-radius:999px;
+          padding:2px 10px; font-size:11.5px; color:#d1d5db; white-space:nowrap; }
+  .pill b { color:#fff; }
+  .pill.ok { border-color:#166534; color:#86efac; }
+  .pill.bad { border-color:#991b1b; color:#fca5a5; }
+  .hbtns { margin-left:auto; display:flex; gap:7px; }
+  .hbtn { background:#374151; color:#e5e7eb; border:0; border-radius:6px;
+          padding:6px 12px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .hbtn:hover { background:#4b5563; }
+
+  .layout { display:flex; height:calc(100vh - 54px); }
+  .side { width:212px; flex:0 0 212px; background:#fff; border-right:1px solid var(--line);
+          display:flex; flex-direction:column; }
+  .side h2 { margin:0; padding:12px; font-size:12.5px; color:#374151;
+             border-bottom:1px solid var(--line); display:flex; align-items:center; }
+  .side h2 .plus { margin-left:auto; cursor:pointer; color:#2563eb; font-weight:700; font-size:16px; padding:0 4px; }
+  .side .list { flex:1; overflow:auto; padding:8px; }
+  .sess { padding:8px 9px; border:1px solid var(--line); border-radius:8px; margin-bottom:7px;
+          cursor:pointer; background:#fff; }
+  .sess:hover { border-color:#93c5fd; background:#f8fafc; }
+  .sess.on { border-color:#2563eb; box-shadow:0 0 0 2px #dbeafe inset; }
+  .sess .t { font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sess .m { font-size:10.5px; color:var(--muted); display:flex; gap:5px; margin-top:3px; flex-wrap:wrap; }
+
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .chat-scroll { flex:1; overflow:auto; }
+  .chat { padding:18px 20px 6px; display:flex; flex-direction:column; gap:13px;
+          max-width:1040px; margin:0 auto; }
+
+  .msg { display:flex; gap:9px; align-items:flex-start; }
+  .msg.user { justify-content:flex-end; }
+  .msg.sys { justify-content:center; }
+  .avatar { width:30px; height:30px; flex:0 0 30px; border-radius:9px; color:#fff;
+            display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; margin-top:2px; }
+  .bubble { border-radius:14px 14px 14px 4px; padding:9px 13px; font-size:13.5px;
+            max-width:860px; min-width:0; overflow-wrap:anywhere; }
+  .msg.user .bubble { background:#2563eb; color:#fff; border-radius:14px 14px 4px 14px; }
+  .msg.sys .bubble { background:#eef2f7; color:#64748b; font-size:12.5px; border-radius:999px; padding:5px 14px; }
+  .msg.agent .bubble { background:#fff; border:1px solid var(--line); box-shadow:0 1px 2px rgba(16,24,40,.04); }
+  .msg.agent.bad .bubble { background:#fff7f7; border-color:#fca5a5; }
+  .msg.agent.warn .bubble { background:#fffbeb; border-color:#fcd34d; }
+  .who { font-size:12px; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .who .en { font-size:10px; color:#9ca3af; font-family:"Cascadia Mono",Consolas,monospace; font-weight:400; }
+  .who .tag { font-size:10.5px; font-weight:500; color:var(--muted); background:#f3f4f6; border-radius:999px; padding:1px 8px; }
+
+  .routebar { display:flex; justify-content:center; }
+  .routebar span { font-size:11.5px; color:#64748b; background:#f1f5f9;
+                   border:1px dashed #cbd5e1; border-radius:999px; padding:3px 14px; }
+  .routebar.forced span { border-color:#fcd34d; background:#fffbeb; color:#92400e; }
+
+  .dots span { display:inline-block; width:5px; height:5px; margin-right:3px; border-radius:50%;
+               background:#94a3b8; animation:blink 1.2s infinite; }
+  .dots span:nth-child(2){animation-delay:.2s;} .dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink { 0%,60%,100%{opacity:.25} 30%{opacity:1} }
+
+  pre.sql { margin:6px 0; padding:9px 11px; background:#0b1220; color:#a7f3d0; border-radius:8px;
+            font-size:12.5px; overflow-x:auto; white-space:pre-wrap; word-break:break-word; line-height:1.65; }
+  .risk { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11px; font-weight:700; }
+  .r-只读 { background:#dcfce7; color:#166534; }
+  .r-写入 { background:#dbeafe; color:#1d4ed8; }
+  .r-需确认 { background:#fef3c7; color:#92400e; }
+  .r-禁止 { background:#fee2e2; color:#991b1b; }
+
+  .intent { border-left:3px solid #e5e7eb; padding:4px 9px; margin:4px 0; background:#fafafa;
+            border-radius:0 6px 6px 0; font-size:12.5px; }
+  .intent .id { font-weight:700; color:var(--planner); }
+  .chk { display:flex; gap:6px; font-size:12px; padding:2px 0; border-bottom:1px dashed #eef0f3; }
+  .chk .mark { font-weight:700; width:14px; }
+  .chk.pass .mark { color:var(--ok); } .chk.fail .mark { color:var(--bad); }
+  .chk .d { color:var(--muted); font-size:11px; }
+
+  .verdict { margin-top:7px; padding:7px 10px; border-radius:8px; font-size:13px; font-weight:700; }
+  .verdict.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .verdict.no { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+  .verdict .why { display:block; font-weight:400; font-size:12px; margin-top:4px; }
+
+  table.grid { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+  table.grid th, table.grid td { border:1px solid var(--line); padding:4px 7px; text-align:left; }
+  table.grid th { background:#f8fafc; color:var(--muted); font-weight:600; }
+  .affect { font-size:12.5px; margin-top:5px; }
+  .affect b { color:#b45309; }
+
+  .confirmcard { margin-top:8px; border:2px solid var(--warn); background:#fffbeb;
+                 border-radius:10px; padding:10px 12px; }
+  .confirmcard h4 { margin:0 0 6px; font-size:13px; color:#92400e; }
+  .confirmcard .acts { display:flex; gap:8px; margin-top:9px; }
+  .btn { border:0; border-radius:8px; padding:6px 16px; font-size:13px; font-weight:700; cursor:pointer; }
+  .btn.ok { background:#16a34a; color:#fff; }
+  .btn.ok:hover { background:#15803d; }
+  .btn.cancel { background:#f3f4f6; color:#374151; }
+  .btn.cancel:hover { background:#e5e7eb; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+
+  .composer { border-top:1px solid var(--line); background:#fff; padding:10px 16px 12px; }
+  .composer .samples { max-width:1040px; margin:0 auto 7px; display:flex; gap:7px;
+                       align-items:center; flex-wrap:wrap; font-size:11.5px; color:#9ca3af; }
+  .opt { border:1px solid #c7d2fe; background:#eef2ff; color:#3730a3; border-radius:8px;
+         padding:3px 11px; font-size:11.5px; cursor:pointer; font-weight:600; }
+  .opt:hover { background:#e0e7ff; }
+  .composer .inner { max-width:1040px; margin:0 auto; display:flex; gap:9px; align-items:flex-end; }
+  textarea { flex:1; resize:none; border:1px solid var(--line); border-radius:10px; padding:9px 12px;
+             font:inherit; font-size:13.5px; max-height:150px; min-height:42px; outline:none; color:var(--text); }
+  textarea:focus { border-color:#93c5fd; box-shadow:0 0 0 3px #dbeafe; }
+  .send { background:#2563eb; color:#fff; border:0; border-radius:10px; padding:11px 20px;
+          font-size:13.5px; font-weight:600; cursor:pointer; flex-shrink:0; }
+  .send:hover { background:#1d4ed8; }
+  .send:disabled { background:#9ca3af; cursor:not-allowed; }
+  .tip { max-width:1040px; margin:5px auto 0; font-size:11px; color:#9ca3af; }
+
+  .overlay { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; z-index:50; padding:26px; }
+  .overlay.open { display:block; }
+  .win { background:#fff; border-radius:12px; height:100%; display:flex; flex-direction:column;
+         overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.35); }
+  .bar { display:flex; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line);
+         background:#f9fafb; flex-wrap:wrap; }
+  .bar b { font-size:14px; } .bar .hint { font-size:12px; color:var(--muted); }
+  .bar .acts { margin-left:auto; }
+  .mini { background:#fff; color:#374151; border:1px solid var(--line); border-radius:6px;
+          padding:4px 11px; font-size:12px; font-weight:600; cursor:pointer; }
+  .mini:hover { background:#f3f4f6; }
+  .win-body { flex:1; overflow:auto; padding:16px; }
+  .empty { color:var(--muted); font-size:12.5px; text-align:center; padding:22px 8px; }
+  .tbl { border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-bottom:10px; background:#fbfdff; }
+  .tbl .hd { font-size:12.5px; font-weight:700; color:#0f766e; margin-bottom:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>sql-agent · 自然语言转 SQL</h1>
+  <div class="pills">
+    <span class="pill" id="p-status">状态 <b>—</b></span>
+    <span class="pill" id="p-round">轮次 <b>—</b></span>
+    <span class="pill" id="p-health">连接中…</span>
+  </div>
+  <div class="hbtns">
+    <button class="hbtn" id="btn-schema">🗂 表结构</button>
+    <button class="hbtn" id="btn-audit">🧾 SQL 审计</button>
+    <button class="hbtn" id="btn-route">🔀 协作链路</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="side">
+    <h2>会话 <span class="plus" id="btn-new" title="新建会话">＋</span></h2>
+    <div class="list" id="sess-list"><div class="empty">暂无会话</div></div>
+  </aside>
+  <main class="main">
+    <div class="chat-scroll" id="chat-scroll"><div class="chat" id="chat"></div></div>
+    <div class="composer">
+      <div class="samples" id="samples"><span>试试：</span></div>
+      <div class="inner">
+        <textarea id="input" rows="1" placeholder="用自然语言说你想对数据库做什么…（例如：查一下北京客户的订单总额）"></textarea>
+        <button class="send" id="btn-send">发送</button>
+      </div>
+      <div class="tip">只能查(SELECT) / 改(UPDATE) / 删(DELETE)，禁止一切 DDL；删除操作需要你确认后才执行</div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="info-overlay">
+  <div class="win">
+    <div class="bar"><b id="info-title">详情</b><span class="hint" id="info-hint"></span>
+      <div class="acts"><button class="mini" id="info-close">关闭 ✕</button></div></div>
+    <div class="win-body" id="info-body"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const clip = (t, n) => { t = String(t ?? '').replace(/\s+/g,' ').trim(); return t.length > n ? t.slice(0,n-1)+'…' : t; };
+
+const AGENT = {
+  planner:   { cn:'规划器',      face:'规', color:'var(--planner)',   busy:'正在理解你的问题…' },
+  generator: { cn:'SQL 生成',    face:'生', color:'var(--generator)', busy:'正在写 SQL…' },
+  validator: { cn:'SQL 验证',    face:'验', color:'var(--validator)', busy:'正在验证 SQL…' },
+  executor:  { cn:'SQL 执行',    face:'执', color:'var(--executor)',  busy:'正在执行…' },
+  fixer:     { cn:'SQL 修正',    face:'修', color:'var(--fixer)',     busy:'正在修正 SQL…' },
+  reviewer:  { cn:'汇总审查',    face:'审', color:'var(--reviewer)',  busy:'正在汇总…' },
+  router:    { cn:'路由护栏',    face:'路', color:'var(--router)',    busy:'' },
+  system:    { cn:'系统',        face:'系', color:'var(--router)',    busy:'' },
+};
+const A = (r) => AGENT[r] || AGENT.system;
+const STATUS_CN = { created:'已创建', planning:'规划中', generating:'生成中', validating:'验证中',
+                    confirming:'⏸ 等确认', executing:'执行中', fixing:'修正中',
+                    reviewing:'审查中', done:'已完成', failed:'失败' };
+const statusCN = (s) => STATUS_CN[s] || s || '—';
+
+const store = { chat:[], blocks:[], folds:{}, runId:null, runInfo:{}, events:[], tasks:[],
+                audit:[], awaiting:null, finished:false, es:null, infoMode:null, schema:null };
+
+/* ---------------- 事件 ---------------- */
+function ensure(role, round) {
+  const key = `${round}::${role}`;
+  let b = store.blocks.find((x) => x.key === key);
+  if (!b) { b = { kind:'agent', key, role, round, typing:true, items:[], summary:'' };
+            store.blocks.push(b); store.chat.push(b); }
+  return b;
+}
+function push(item) { store.chat.push(item); renderChat(); scrollDown(); }
+function scrollDown() {
+  const box = $('chat-scroll');
+  if (!box) return;
+  if (box.scrollHeight - box.scrollTop - box.clientHeight < 150)
+    requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+}
+document.addEventListener('toggle', (ev) => {
+  const d = ev.target;
+  if (d && d.tagName === 'DETAILS' && d.dataset.fold) store.folds[d.dataset.fold] = d.open;
+}, true);
+const foldOpen = (k, def) => (k in store.folds ? store.folds[k] : def);
+
+function handleEvent(e) {
+  store.events.push(e);
+  const p = e.payload || {}, role = e.role, round = e.round ?? 0;
+  switch (e.event_type) {
+    case 'run_created':
+      store.runInfo = { question:p.question, status:'created', version:0, round:0, tables:p.tables||[] };
+      push({ kind:'sys', text:`开始。可访问的表：${(p.tables||[]).join('、')}` });
+      break;
+    case 'node_start': ensure(role, round); break;
+    case 'node_end': {
+      const b = ensure(role, round); b.typing = false; b.summary = p.summary || '';
+      break;
+    }
+    case 'plan': {
+      const b = ensure(role, round); b.typing = false;
+      b.items.push({ type:'plan', understanding:p.understanding, reason:p.plan_reason,
+                     intents:p.intents||[], refusal:p.refusal });
+      break;
+    }
+    case 'sql': {
+      const b = ensure(role, round); b.typing = false;
+      b.items.push({ type:'sql', stage:p.stage, draft:p.draft||{}, verdict:p.verdict||{},
+                     whatChanged:p.what_changed });
+      break;
+    }
+    case 'check': { ensure(role, round).items.push({ type:'check', check:p }); break; }
+    case 'verdict': { ensure(role, round).items.push({ type:'verdict', v:p }); break; }
+    case 'handoff': {
+      push({ kind:'route', from:p.from, to:p.to, reason:p.reason,
+             modelWanted:p.model_wanted, overridden:p.overridden });
+      break;
+    }
+    case 'await_confirm':
+      store.awaiting = p;
+      ensure('executor', round).typing = false;
+      ensure('executor', round).items.push({ type:'confirm', req:p, done:false });
+      break;
+    case 'confirmed':
+      store.awaiting = null;
+      for (const b of store.blocks) for (const it of b.items)
+        if (it.type === 'confirm') { it.done = true; it.approve = p.approve; it.by = p.by; }
+      push({ kind:'sys', text:`你${p.approve ? '确认执行' : '取消了执行'}（${p.by}）` });
+      break;
+    case 'result': {
+      const b = ensure(role, round); b.typing = false;
+      b.items.push({ type:'result', r:p });
+      break;
+    }
+    case 'consistency': { ensure(role, round).items.push({ type:'consistency', c:p }); break; }
+    case 'review': {
+      const b = ensure(role, round); b.typing = false;
+      b.items.push({ type:'review', rv:p });
+      break;
+    }
+    case 'done':
+      store.finished = true; store.awaiting = null;
+      store.runInfo.status = p.status; store.runInfo.round = p.round ?? 0;
+      push({ kind:'sys', done:true, text:
+        `${p.status === 'done' ? '完成' : '结束'} · 共 ${(p.round ?? 0) + 1} 轮 · ${p.reason || ''}` });
+      refreshDetail(); loadSessions();
+      break;
+    case 'error':
+      push({ kind:'sys', bad:true, text:`出错了：${clip(p.message, 130)}` });
+      break;
+  }
+  render();
+}
+
+/* ---------------- 渲染 ---------------- */
+function renderHeader() {
+  const r = store.runInfo;
+  $('p-status').innerHTML = `状态 <b>${esc(statusCN(r.status))}</b>`;
+  $('p-round').innerHTML = `轮次 <b>第 ${(r.round ?? 0) + 1} 轮</b>`;
+}
+async function loadHealth() {
+  try {
+    const h = await (await fetch('/api/health')).json();
+    const ok = h.ledger === 'ok' && h.runner === 'ok';
+    $('p-health').className = 'pill ' + (ok ? 'ok' : 'bad');
+    $('p-health').innerHTML =
+      `记录库 <b>${esc(h.ledger_db)}</b> · 执行库 <b>${esc(h.biz_db)}</b> · 身份 <b>${esc(h.runner_user)}</b>`;
+  } catch (e) { $('p-health').textContent = '服务不可达'; }
+}
+async function loadSessions() {
+  try {
+    const rows = await (await fetch('/api/runs')).json();
+    const box = $('sess-list');
+    if (!rows.length) { box.innerHTML = '<div class="empty">暂无会话</div>'; return; }
+    box.innerHTML = rows.map((r) => `<div class="sess${r.global_task_id===store.runId?' on':''}" data-id="${esc(r.global_task_id)}">
+      <div class="t">${esc(clip(r.question, 20))}</div>
+      <div class="m"><span>${esc(statusCN(r.status))}</span><span>第 ${r.round+1} 轮</span></div></div>`).join('');
+    box.querySelectorAll('.sess').forEach((el) => { el.onclick = () => openSession(el.dataset.id); });
+  } catch (e) {}
+}
+async function loadSamples() {
+  try {
+    const rows = await (await fetch('/api/samples')).json();
+    $('samples').innerHTML = '<span>试试：</span>' + rows.map((s) =>
+      `<span class="opt" data-sample="${esc(s.id)}" title="${esc(s.expect)}">${esc(s.label)}</span>`).join('');
+  } catch (e) {}
+}
+
+function renderItem(it, b) {
+  if (it.type === 'plan') {
+    let h = `<div>${esc(it.understanding || '')}</div>`;
+    if (it.refusal) {
+      h += `<div class="verdict no">🚫 这个请求我不做<div class="why">${esc(it.refusal)}</div></div>`;
+      return h;
+    }
+    (it.intents || []).forEach((t) => {
+      h += `<div class="intent"><span class="id">${esc(t.sub_task_id)}</span> ${esc(t.intent)}
+        <span class="tag">${esc(t.kind)}</span>
+        <div class="ghost" style="font-size:11px;color:#6b7280">涉及表：${esc((t.tables||[]).join('、') || '—')}</div></div>`;
+    });
+    if (it.reason) h += `<div style="font-size:11.5px;color:#6b7280;margin-top:4px">${esc(it.reason)}</div>`;
+    return h;
+  }
+  if (it.type === 'sql') {
+    const v = it.verdict || {};
+    let h = `<div style="display:flex;gap:7px;align-items:center;margin-bottom:2px">
+      <span class="risk r-${esc(v.level)}">${esc(v.level)}</span>
+      <span style="font-size:11.5px;color:#6b7280">${esc(v.action || '')} · ${esc((v.tables||[]).join('、'))}</span></div>
+      <pre class="sql">${esc((it.draft || {}).sql || '')}</pre>`;
+    if (it.whatChanged) h += `<div style="font-size:12px;color:#be185d">修正说明：${esc(it.whatChanged)}</div>`;
+    if ((it.draft || {}).note) h += `<div style="font-size:11.5px;color:#6b7280">${esc(it.draft.note)}</div>`;
+    if ((v.notes || []).length) h += `<div style="font-size:11.5px;color:#b45309">⚠ ${esc(v.notes.join('；'))}</div>`;
+    if ((v.reasons || []).length) h += `<div style="font-size:11.5px;color:#dc2626">🚫 ${esc(v.reasons.join('；'))}</div>`;
+    return h;
+  }
+  if (it.type === 'check') {
+    const c = it.check;
+    return `<div class="chk ${esc(c.result)}"><span class="mark">${c.result==='pass'?'✓':'✕'}</span>
+      <span>${esc(c.item)}<div class="d">${esc(c.detail)}</div></span></div>`;
+  }
+  if (it.type === 'verdict') {
+    return `<div class="verdict ${it.v.passed ? 'ok':'no'}">${it.v.passed ? '✓ 验证通过':'✕ 验证不通过'}
+      ${it.v.forced_by_runtime ? '<span class="tag" style="background:#fee2e2;color:#991b1b">运行时强制</span>':''}
+      <span class="why">${esc(it.v.reason)}</span></div>`;
+  }
+  if (it.type === 'confirm') {
+    const q = it.req || {};
+    let h = `<div class="confirmcard"><h4>⏸ 需要你确认后才执行</h4>
+      <pre class="sql">${esc(q.sql || '')}</pre>
+      <div style="font-size:12.5px">风险：<b>${esc(q.risk_level)}</b>（${esc(q.action)}）
+        ｜ 涉及表：${esc((q.tables||[]).join('、'))}
+        ｜ 预估影响：<b>${esc(q.est_rows ?? '未知')}</b> 行</div>`;
+    (q.notes || []).forEach((n) => { h += `<div style="font-size:12px;color:#b45309">⚠ ${esc(n)}</div>`; });
+    (q.cascade || []).forEach((n) => { h += `<div style="font-size:12px;color:#b45309">⚠ ${esc(n)}</div>`; });
+    if (!it.done) {
+      h += `<div class="acts"><button class="btn ok" data-confirm="1">确认执行</button>
+        <button class="btn cancel" data-confirm="0">取消</button></div>`;
+    } else {
+      h += `<div style="margin-top:8px;font-weight:700;color:${it.approve?'#166534':'#6b7280'}">
+        ${it.approve ? '✓ 已确认执行' : '✕ 已取消'}（${esc(it.by || '')}）</div>`;
+    }
+    return h + `</div>`;
+  }
+  if (it.type === 'result') {
+    const r = it.r || {};
+    if (r.kind === 'cancelled') return `<div class="affect">已取消，未做任何改动。</div>`;
+    if (!r.ok) return `<div class="affect" style="color:#dc2626">执行失败：${esc(clip(r.error, 160))}</div>`;
+    if (r.kind === 'affected')
+      return `<div class="affect">影响 <b>${esc(r.rowcount)}</b> 行（${esc(r.duration_ms)}ms）</div>`;
+    const cols = r.columns || [], rows = r.rows || [];
+    let h = `<div class="affect">返回 <b>${esc(r.rowcount)}</b> 行（${esc(r.duration_ms)}ms）`;
+    if (r.truncated) h += `，已截断到上限`;
+    h += `</div><table class="grid"><thead><tr>${cols.map((c)=>`<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>`;
+    rows.forEach((row) => { h += `<tr>${row.map((v)=>`<td>${esc(v)}</td>`).join('')}</tr>`; });
+    return h + `</tbody></table>`;
+  }
+  if (it.type === 'consistency') {
+    const c = it.c || {};
+    const fails = (c.results||[]).filter((r)=>r.result==='fail');
+    const k = `${b.key}::cons`;
+    let h = `<details class="fold2" data-fold="${esc(k)}" ${foldOpen(k, fails.length>0)?'open':''}>
+      <summary style="cursor:pointer;font-size:12px;color:#6b7280">运行时一致性校验 · ${c.passed?'8 条全部通过':`${fails.length} 条失败`}</summary>`;
+    (c.results||[]).forEach((r) => {
+      h += `<div class="chk ${esc(r.result)}"><span class="mark">${r.result==='pass'?'✓':'✕'}</span>
+        <span>${esc(r.title)}<div class="d">${esc(r.detail)}</div></span></div>`;
+    });
+    return h + `</details>`;
+  }
+  if (it.type === 'review') {
+    const rv = it.rv || {};
+    const ok = rv.decision === 'approve';
+    let h = `<div class="verdict ${ok?'ok':'no'}">${ok?'✓ 通过':'✕ 否决'}
+      ${rv.forced_by_runtime?'<span class="tag" style="background:#fee2e2;color:#991b1b">运行时强制否决</span>':''}
+      <span class="why">${esc(rv.reason)}</span></div>`;
+    if (rv.final_answer) h += `<div style="margin-top:9px;white-space:pre-wrap;font-size:13.5px">${esc(rv.final_answer)}</div>`;
+    return h;
+  }
+  return '';
+}
+
+function renderBubble(b) {
+  const a = A(b.role);
+  const bad = (b.items||[]).some((i) => i.type==='review' && i.rv && i.rv.decision==='veto')
+           || (b.items||[]).some((i) => i.type==='verdict' && i.v && !i.v.passed);
+  const warn = (b.items||[]).some((i) => i.type==='confirm' && !i.done)
+            || (b.items||[]).some((i) => i.type==='sql' && i.verdict && i.verdict.level==='需确认');
+  let h = `<div class="msg agent ${bad?'bad':''} ${warn?'warn':''}">
+    <div class="avatar" style="background:${a.color}">${a.face}</div><div class="bubble">
+    <div class="who" style="color:${a.color}">${esc(a.cn)}<span class="en">${esc(b.role)}</span>
+      ${b.round>0?`<span class="tag">第 ${b.round+1} 轮</span>`:''}</div>`;
+  if (!(b.items||[]).length && b.typing) {
+    h += `<div class="dots"><span></span><span></span><span></span>
+      <span style="background:none;color:#94a3b8;font-size:12px;margin-left:4px">${esc(a.busy)}</span></div>`;
+  } else {
+    (b.items||[]).forEach((it) => { h += renderItem(it, b); });
+    if (b.typing) h += `<div class="dots" style="margin-top:5px"><span></span><span></span><span></span></div>`;
+    else if (b.summary && b.role !== 'reviewer')
+      h += `<div style="font-size:11.5px;color:#6b7280;margin-top:5px">${esc(b.summary)}</div>`;
+  }
+  return h + `</div></div>`;
+}
+
+function renderChat() {
+  const box = $('chat');
+  if (!store.chat.length) {
+    box.innerHTML = `<div class="empty">
+      用自然语言说你想对数据库做什么。<br>
+      六个智能体会协作完成：规划 → 生成 SQL → 验证 → 执行，失败就自动修正。<br>
+      删除操作会停下来等你确认；任何 DDL 一律拒绝。
+    </div>`;
+    return;
+  }
+  box.innerHTML = store.chat.map((it) => {
+    if (it.kind === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
+    if (it.kind === 'sys') {
+      const extra = it.done ? `<div style="margin-top:8px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <span class="opt" data-open="audit">SQL 审计</span>
+        <span class="opt" data-open="route">协作链路</span>
+        <span class="opt" data-open="schema">表结构</span></div>` : '';
+      return `<div class="msg sys"><div class="bubble" style="${it.bad?'background:#fee2e2;color:#991b1b':''}">${esc(it.text)}${extra}</div></div>`;
+    }
+    if (it.kind === 'route') {
+      return `<div class="routebar ${it.overridden?'forced':''}"><span>
+        ${esc(A(it.from).cn)} → ${esc(A(it.to).cn)}｜${esc(it.reason)}
+        ${it.overridden ? `　⚠ 护栏改了模型的建议（模型想给 ${esc(A(it.modelWanted).cn)}）` : ''}</span></div>`;
+    }
+    return renderBubble(it);
+  }).join('');
+}
+
+function render() { renderHeader(); renderChat(); if ($('info-overlay').classList.contains('open')) renderInfo(); }
+
+/* ---------------- 交互 ---------------- */
+async function send() {
+  const box = $('input'), text = box.value.trim();
+  if (!text) return;
+  if (store.finished) newSession();
+  box.value = ''; box.style.height = 'auto';
+  push({ kind:'user', text });
+  const btn = $('btn-send'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/runs', { method:'POST', headers:{'Content-Type':'application/json'},
+                                         body: JSON.stringify({ question: text }) });
+    const created = await r.json();
+    store.runId = created.global_task_id;
+    store.runInfo = { question: text, status:'created', version:0, round:0 };
+    renderHeader(); loadSessions(); openStream(store.runId);
+    await fetch(`/api/runs/${store.runId}/start`, { method:'POST' });
+  } catch (e) { push({ kind:'sys', bad:true, text:`启动失败：${e}` }); }
+  finally { btn.disabled = false; }
+}
+
+async function decide(approve, by='用户') {
+  if (!store.runId || !store.awaiting) return;
+  document.querySelectorAll('[data-confirm]').forEach((b) => { b.disabled = true; });
+  await fetch(`/api/runs/${store.runId}/confirm`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ approve, by }) });
+}
+
+function openStream(runId) {
+  if (store.es) store.es.close();
+  const es = new EventSource(`/api/runs/${runId}/stream`);
+  store.es = es;
+  ['run_created','node_start','node_end','plan','sql','check','verdict','handoff',
+   'await_confirm','confirmed','result','consistency','review','done','error'].forEach((t) => {
+    es.addEventListener(t, (ev) => {
+      try { handleEvent(JSON.parse(ev.data)); } catch (e) { console.error(e); }
+      if (t === 'done') { store.finished = true; es.close(); store.es = null; loadSessions(); }
+    });
+  });
+  es.onerror = () => { if (store.finished) { es.close(); store.es = null; } };
+}
+
+function newSession() {
+  if (store.es) { store.es.close(); store.es = null; }
+  store.chat = []; store.blocks = []; store.folds = []; store.events = []; store.tasks = [];
+  store.audit = []; store.awaiting = null; store.finished = false;
+  store.runId = null; store.runInfo = {}; store.schema = null;
+  render();
+}
+async function openSession(runId) {
+  newSession(); store.runId = runId;
+  const d = await (await fetch(`/api/runs/${runId}`)).json();
+  store.runInfo = { ...d.run }; store.tasks = d.tasks; store.audit = d.audit;
+  store.chat.push({ kind:'user', text: d.run.question });
+  (d.events || []).forEach(handleEvent);
+  render(); loadSessions();
+  if (!['done','failed'].includes(store.runInfo.status)) openStream(runId);
+}
+async function refreshDetail() {
+  if (!store.runId) return;
+  const d = await (await fetch(`/api/runs/${store.runId}`)).json();
+  store.tasks = d.tasks; store.audit = d.audit;
+  if ($('info-overlay').classList.contains('open')) renderInfo();
+}
+
+/* ---------------- 覆盖层 ---------------- */
+const RISK_ORDER = { '禁止':0, '需确认':1, '写入':2, '只读':3 };
+function renderInfo() {
+  if (store.infoMode === 'schema') {
+    $('info-title').textContent = '可访问的表结构';
+    $('info-hint').textContent = '这是受限角色实际能看到的表 —— 白名单也来自这里';
+    const s = store.schema;
+    if (!s) { $('info-body').innerHTML = '<div class="empty">加载中…</div>'; return; }
+    const tables = s.tables || {};
+    if (!Object.keys(tables).length) { $('info-body').innerHTML = '<div class="empty">没有可访问的表</div>'; return; }
+    $('info-body').innerHTML = Object.values(tables).map((t) => `
+      <div class="tbl"><div class="hd">${esc(t.name)}</div>
+      <table class="grid"><thead><tr><th>字段</th><th>类型</th><th>约束</th></tr></thead><tbody>
+      ${t.columns.map((c)=>`<tr><td>${esc(c.name)}${(t.pk||[]).includes(c.name)?' <b>PK</b>':''}</td>
+        <td class="mono">${esc(c.type)}</td><td>${c.null?'':'NOT NULL'}</td></tr>`).join('')}
+      </tbody></table>
+      ${(t.fk||[]).map((f)=>`<div style="font-size:11.5px;color:#6b7280;margin-top:4px">外键 ${esc(f.column)} → ${esc(f.ref_table)}.${esc(f.ref_column)}（ON DELETE ${esc(f.on_delete)}）</div>`).join('')}
+      </div>`).join('');
+    return;
+  }
+  if (store.infoMode === 'audit') {
+    $('info-title').textContent = 'SQL 审计';
+    $('info-hint').textContent = '每条 SQL 从生成到执行的全程留痕（存在 agent_sql 库）';
+    if (!store.audit.length) { $('info-body').innerHTML = '<div class="empty">这次没有执行任何 SQL</div>'; return; }
+    $('info-body').innerHTML = `<table class="grid"><thead><tr>
+      <th>轮</th><th>子任务</th><th>阶段</th><th>类型</th><th>风险</th><th>影响</th><th>确认人</th><th>SQL</th>
+      </tr></thead><tbody>${store.audit.map((a)=>`<tr>
+      <td>${esc(a.round)}</td><td>${esc(a.sub_task_id)}</td><td><b>${esc(a.stage)}</b></td>
+      <td>${esc(a.action||'-')}</td><td><span class="risk r-${esc(a.risk_level||'只读')}">${esc(a.risk_level||'-')}</span></td>
+      <td>${a.affected_rows ?? '-'}</td><td>${esc(a.confirmed_by||'-')}</td>
+      <td class="mono">${esc(clip(a.sql,90))}${a.error?`<div style="color:#dc2626">${esc(clip(a.error,80))}</div>`:''}</td>
+      </tr>`).join('')}</tbody></table>`;
+    return;
+  }
+  // route：协作链路（动态路由）
+  $('info-title').textContent = '协作链路';
+  $('info-hint').textContent = '链路不固定 —— 每个智能体自己建议下一步，护栏决定能不能去';
+  const hs = store.events.filter((e) => e.event_type === 'handoff');
+  if (!hs.length) { $('info-body').innerHTML = '<div class="empty">还没有路由记录</div>'; return; }
+  $('info-body').innerHTML = hs.map((e, i) => {
+    const p = e.payload || {};
+    return `<div class="chunk" style="border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin-bottom:7px;background:${p.overridden?'#fffbeb':'#fbfdff'}">
+      <div style="font-size:11.5px;color:#6b7280">第 ${i+1} 步 · r${e.round}</div>
+      <div style="font-weight:700">${esc(A(p.from).cn)} → ${esc(A(p.to).cn)}</div>
+      <div style="font-size:12.5px;color:#374151">${esc(p.reason)}</div>
+      ${p.overridden?`<div style="font-size:11.5px;color:#92400e">⚠ 模型建议去 ${esc(A(p.model_wanted).cn)}，被护栏拦住</div>`:''}
+    </div>`;
+  }).join('');
+}
+async function openInfo(mode) {
+  store.infoMode = mode;
+  $('info-overlay').classList.add('open');
+  if (mode === 'schema' && !store.schema) {
+    renderInfo();
+    store.schema = await (await fetch('/api/schema')).json();
+  }
+  renderInfo();
+}
+function closeInfo() { $('info-overlay').classList.remove('open'); }
+
+/* ---------------- 绑定 ---------------- */
+$('btn-send').onclick = send;
+$('input').addEventListener('keydown', (ev) => { if (ev.key==='Enter' && !ev.shiftKey) { ev.preventDefault(); send(); } });
+$('input').addEventListener('input', (ev) => {
+  ev.target.style.height = 'auto'; ev.target.style.height = Math.min(150, ev.target.scrollHeight)+'px';
+});
+$('btn-new').onclick = () => { newSession(); $('input').focus(); };
+$('btn-schema').onclick = () => openInfo('schema');
+$('btn-audit').onclick = () => openInfo('audit');
+$('btn-route').onclick = () => openInfo('route');
+$('info-close').onclick = closeInfo;
+$('info-overlay').onclick = (ev) => { if (ev.target === $('info-overlay')) closeInfo(); };
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeInfo(); });
+document.addEventListener('click', (ev) => {
+  const t = ev.target;
+  const c = t.dataset && t.dataset.confirm;
+  if (c !== undefined && c !== '') { decide(c === '1'); return; }
+  const o = t.dataset && t.dataset.open;
+  if (o) { openInfo(o); return; }
+  const s = t.dataset && t.dataset.sample;
+  if (s) { fetch(`/api/samples`).then(async () => {
+      const rows = await (await fetch('/api/samples')).json();
+      const found = rows.find((x) => x.id === s);
+      if (found) { newSession(); $('input').value = found.question; send(); }
+    }); }
+});
+
+(async function init() {
+  await loadHealth(); await loadSamples(); await loadSessions(); render();
+  $('input').focus();
+})();
+</script>
+</body>
+</html>

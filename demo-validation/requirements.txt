@@ -1,0 +1,24 @@
+# ============================================================
+# 多 Agent 协作一致性演示 · 依赖
+# 目标：Python 3.10 / langchain>=1.0 / langgraph>=1.0
+# ============================================================
+
+# ---------- Agent 编排（要求 1.x）----------
+langgraph>=1.0,<2.0
+langgraph-checkpoint-postgres>=2.0
+langchain>=1.0,<2.0
+langchain-core>=1.0,<2.0
+langchain-openai>=1.0,<2.0
+
+# ---------- Web 服务 ----------
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sse-starlette>=2.1
+
+# ---------- 数据库（Psycopg 3，PostgresSaver 必需）----------
+psycopg[binary,pool]>=3.2
+
+# ---------- 配置与校验 ----------
+pydantic>=2.9
+pydantic-settings>=2.5
+python-dotenv>=1.0

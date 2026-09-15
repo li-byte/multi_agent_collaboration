@@ -1,0 +1,28 @@
+# ---------- 密钥（务必不要提交）----------
+.env
+*.env
+!.env.example
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---------- 虚拟环境 ----------
+.venv/
+.venv310/
+venv/
+env/
+
+# ---------- IDE ----------
+.idea/
+.vscode/
+*.iml
+
+# ---------- 系统 ----------
+.DS_Store
+Thumbs.db
+
+# ---------- 运行产物 ----------
+*.log
