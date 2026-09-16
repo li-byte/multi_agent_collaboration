@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     pg_db_ledger: str = "agent_sql"   # 项目自身记录（账本 / 审计）
     pg_db_biz: str = "cs_v1"          # 智能体执行 SQL 的目标库
 
+    # ---------- 表目录（表信息是数据，不是代码）----------
+    # 智能体关于「库里有什么」的全部依据。留空则用随项目发布的 config/tables.json。
+    # 换库 / 换租户 / 换环境时指到别的文件即可，代码不用动。
+    tables_file: str = ""
+
     # 受限执行角色：只有业务表的 DML 权限
     runner_user: str = "agent_sql_runner"
     runner_password: str = "runner.2024.cs_v1"

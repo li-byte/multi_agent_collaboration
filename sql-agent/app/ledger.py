@@ -103,20 +103,26 @@ class Ledger:
         dropped: list[str] = []
         async with self.pool.connection() as conn:
             async with conn.cursor() as cur:
-                for table in ("sql_audit", "agent_event", "agent_task", "agent_run"):
+                for table in ("llm_call", "agent_memory", "sql_audit", "agent_event",
+                      "agent_task", "agent_run"):
                     await cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
                     dropped.append(table)
         return dropped
 
     # ------------------------------------------------------------ run
 
-    async def create_run(self, run_id: str, question: str, max_rounds: int) -> dict:
+    async def create_run(self, run_id: str, question: str, max_rounds: int,
+                         conversation_id: str | None = None,
+                         turn: int = 1) -> dict:
+        """新建一轮。`conversation_id` 相同就是同一个会话的后续追问。"""
         sql = """
-        INSERT INTO agent_run (global_task_id, question, status, round, version, max_rounds)
-        VALUES (%s, %s, 'created', 0, 0, %s)
+        INSERT INTO agent_run (global_task_id, question, status, round, version,
+                               max_rounds, conversation_id, turn)
+        VALUES (%s, %s, 'created', 0, 0, %s, %s, %s)
         RETURNING *
         """
-        row = await self.fetchone(sql, (_uid(run_id), question, max_rounds))
+        row = await self.fetchone(sql, (_uid(run_id), question, max_rounds,
+                                        conversation_id or str(run_id), turn))
         assert row is not None
         return row
 
@@ -124,10 +130,78 @@ class Ledger:
         return await self.fetchone(
             "SELECT * FROM agent_run WHERE global_task_id = %s", (_uid(run_id),))
 
-    async def list_runs(self, limit: int = 40) -> list[dict]:
+    async def list_turns(self, conversation_id: str) -> list[dict]:
+        """一个会话里的所有轮次，按先后顺序。"""
         return await self.fetchall(
-            "SELECT global_task_id, question, status, round, version, created_at "
-            "FROM agent_run ORDER BY created_at DESC LIMIT %s", (limit,))
+            """SELECT global_task_id, question, status, round, turn, created_at, updated_at
+                 FROM agent_run WHERE conversation_id = %s
+                ORDER BY turn, created_at""", (conversation_id,))
+
+    async def next_turn(self, conversation_id: str) -> int:
+        row = await self.fetchone(
+            "SELECT COALESCE(max(turn), 0) + 1 AS n FROM agent_run WHERE conversation_id = %s",
+            (conversation_id,))
+        return int((row or {}).get("n") or 1)
+
+    async def list_runs(self, limit: int = 40) -> list[dict]:
+        """会话列表：**一个会话一条**（多轮提问合并成一条），
+        按最后活动时间倒序，并带上「这个会话一共改了什么数据」的摘要。
+
+        没有 conversation_id 的老数据（或单轮提问）按 `global_task_id` 各自成条，
+        所以升级不会打乱既有记录。
+        """
+        sql = """
+        SELECT c.conv_id,
+               (array_agg(c.question        ORDER BY c.turn DESC, c.created_at DESC))[1] AS question,
+               (array_agg(c.status          ORDER BY c.turn DESC, c.created_at DESC))[1] AS status,
+               (array_agg(c.global_task_id  ORDER BY c.turn DESC, c.created_at DESC))[1] AS global_task_id,
+               (array_agg(c.turn            ORDER BY c.turn DESC, c.created_at DESC))[1] AS turn,
+               count(*) AS turns,
+               max(c.updated_at) AS updated_at,
+               min(c.created_at) AS created_at,
+               COALESCE(s.reads, 0)    AS reads,
+               COALESCE(s.writes, 0)   AS writes,
+               COALESCE(s.affected, 0) AS affected,
+               COALESCE(u.calls, 0)    AS llm_calls,
+               COALESCE(u.tokens, 0)   AS llm_tokens,
+               tt.tables               AS write_tables
+          FROM (
+              SELECT COALESCE(conversation_id, global_task_id::text) AS conv_id,
+                     global_task_id, question, status, turn, created_at, updated_at
+                FROM agent_run
+          ) c
+          LEFT JOIN (
+              SELECT COALESCE(r.conversation_id, r.global_task_id::text) AS conv_id,
+                     count(*) FILTER (WHERE a.stage = 'executed' AND a.action =  'SELECT') AS reads,
+                     count(*) FILTER (WHERE a.stage = 'executed' AND a.action <> 'SELECT') AS writes,
+                     COALESCE(sum(a.affected_rows) FILTER (
+                         WHERE a.stage = 'executed' AND a.action <> 'SELECT'), 0)         AS affected
+                FROM sql_audit a
+                JOIN agent_run r ON r.global_task_id = a.global_task_id
+               GROUP BY 1
+          ) s ON s.conv_id = c.conv_id
+          LEFT JOIN (
+              SELECT COALESCE(r.conversation_id, r.global_task_id::text) AS conv_id,
+                     array_agg(DISTINCT t ORDER BY t) AS tables
+                FROM sql_audit a
+                JOIN agent_run r ON r.global_task_id = a.global_task_id,
+                     LATERAL jsonb_array_elements_text(a.tables) AS t
+               WHERE a.stage = 'executed' AND a.action <> 'SELECT'
+               GROUP BY 1
+          ) tt ON tt.conv_id = c.conv_id
+           LEFT JOIN (
+               SELECT COALESCE(r.conversation_id, r.global_task_id::text) AS conv_id,
+                      count(*)                        AS calls,
+                      COALESCE(sum(l.total_tokens), 0) AS tokens
+                 FROM llm_call l
+                 JOIN agent_run r ON r.global_task_id = l.global_task_id
+                GROUP BY 1
+           ) u ON u.conv_id = c.conv_id
+         GROUP BY c.conv_id, s.reads, s.writes, s.affected, u.calls, u.tokens, tt.tables
+         ORDER BY max(c.updated_at) DESC
+         LIMIT %s
+        """
+        return await self.fetchall(sql, (limit,))
 
     async def delete_run(self, run_id: str) -> None:
         await self.fetchone(
@@ -224,6 +298,157 @@ class Ledger:
         return await self.fetchall(
             "SELECT * FROM sql_audit WHERE global_task_id = %s ORDER BY sql_id",
             (_uid(run_id),))
+
+    # ------------------------------------------------------------ 共享记忆
+
+    async def save_memory(
+        self, run_id: str, sub_task_id: str, claim: str, *, sql_id: int | None,
+        sql_text: str, action: str | None, stage: str, verified: bool,
+        entities: dict | None = None, columns: list | None = None,
+        rows: list | None = None, rowcount: int | None = None, round_no: int = 0,
+    ) -> int:
+        """写一条共享记忆（同一子任务只保留最新一条），返回 mem_id。
+
+        **`verified` 只能由「执行器真的执行过」置位** —— 这是这条记忆算不算
+        「事实」的唯一判据，所以由调用方按 stage 决定，不接受模型说辞。
+        """
+        sql = """
+        INSERT INTO agent_memory (global_task_id, sub_task_id, claim, sql_id, sql_text,
+                                  action, stage, verified, entities, columns, rows,
+                                  rowcount, round)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (global_task_id, sub_task_id) DO UPDATE SET
+            claim = EXCLUDED.claim, sql_id = EXCLUDED.sql_id, sql_text = EXCLUDED.sql_text,
+            action = EXCLUDED.action, stage = EXCLUDED.stage, verified = EXCLUDED.verified,
+            entities = EXCLUDED.entities, columns = EXCLUDED.columns, rows = EXCLUDED.rows,
+            rowcount = EXCLUDED.rowcount, round = EXCLUDED.round, created_at = now()
+        RETURNING mem_id
+        """
+        row = await self.fetchone(sql, (
+            _uid(run_id), sub_task_id, claim, sql_id, sql_text, action, stage, verified,
+            _json(entities or {}), _json(columns or []), _json(rows or []),
+            rowcount, round_no))
+        assert row is not None
+        return int(row["mem_id"])
+
+    async def list_memory(self, run_id: str,
+                          sub_task_ids: list[str] | None = None) -> list[dict]:
+        """读共享记忆。给了 `sub_task_ids` 就只取这几条（按依赖取，不全灌）。"""
+        if sub_task_ids:
+            rows = await self.fetchall(
+                """SELECT * FROM agent_memory
+                    WHERE global_task_id = %s AND sub_task_id = ANY(%s)
+                    ORDER BY mem_id""",
+                (_uid(run_id), list(sub_task_ids)))
+        else:
+            rows = await self.fetchall(
+                "SELECT * FROM agent_memory WHERE global_task_id = %s ORDER BY mem_id",
+                (_uid(run_id),))
+        # 记忆要进 state、进事件流、进前端 —— 这里统一成可序列化的形状
+        for r in rows:
+            if r.get("global_task_id") is not None:
+                r["global_task_id"] = str(r["global_task_id"])
+            created = r.get("created_at")
+            if hasattr(created, "isoformat"):
+                r["created_at"] = created.isoformat()
+        return rows
+
+    # ------------------------------------------------------------ 大模型消耗
+
+    async def save_llm_call(
+        self, run_id: str, *, role: str, stage: str, round_no: int = 0, cursor: int = 0,
+        attempt: int = 1, model: str | None = None, prompt_tokens: int = 0,
+        completion_tokens: int = 0, total_tokens: int = 0, cached_tokens: int = 0,
+        reasoning_tokens: int = 0, duration_ms: int | None = None,
+        ok: bool = True, error: str | None = None,
+    ) -> int:
+        """记一次大模型调用的消耗。返回 call_id。
+
+        失败的调用**也要记**：它一样花了输入 token，而且"为什么重试"要看得见。
+        所以 `ok=false` 时 token 记 0 或不记由调用方决定 —— 这里只如实存。
+        """
+        sql = """
+        INSERT INTO llm_call (global_task_id, role, stage, round, cursor, attempt, model,
+                              prompt_tokens, completion_tokens, total_tokens,
+                              cached_tokens, reasoning_tokens, duration_ms, ok, error)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING call_id
+        """
+        row = await self.fetchone(sql, (
+            _uid(run_id), role, stage, round_no, cursor, attempt, model,
+            prompt_tokens, completion_tokens, total_tokens,
+            cached_tokens, reasoning_tokens, duration_ms, ok,
+            (error or "")[:500] or None))
+        assert row is not None
+        return int(row["call_id"])
+
+    async def list_llm_calls(self, run_id: str) -> list[dict]:
+        """本轮的消耗明细，按调用顺序。"""
+        rows = await self.fetchall(
+            """SELECT call_id, global_task_id, role, stage, round, cursor, attempt, model,
+                      prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+                      reasoning_tokens, duration_ms, ok, error, created_at
+                 FROM llm_call WHERE global_task_id = %s ORDER BY call_id""",
+            (_uid(run_id),))
+        for r in rows:
+            if r.get("global_task_id") is not None:
+                r["global_task_id"] = str(r["global_task_id"])
+            if r.get("created_at") is not None:
+                r["created_at"] = r["created_at"].isoformat()
+        return rows
+
+    async def usage_summary(self, run_id: str | None = None) -> dict:
+        """消耗汇总。给了 run_id 就是本轮，否则是**全部会话**的累计。
+
+        只统计真数（`SUM`），不做任何估算 —— 数字要能对账。
+        """
+        where, params = ("WHERE global_task_id = %s", (_uid(run_id),)) if run_id else ("", ())
+        total = await self.fetchone(
+            f"""SELECT count(*) AS calls,
+                       coalesce(sum(prompt_tokens), 0)     AS prompt_tokens,
+                       coalesce(sum(completion_tokens), 0) AS completion_tokens,
+                       coalesce(sum(total_tokens), 0)      AS total_tokens,
+                       coalesce(sum(cached_tokens), 0)     AS cached_tokens,
+                       coalesce(sum(reasoning_tokens), 0)  AS reasoning_tokens,
+                       coalesce(sum(duration_ms), 0)       AS duration_ms,
+                       count(*) FILTER (WHERE NOT ok)      AS failed
+                  FROM llm_call {where}""", params)
+        by_role = await self.fetchall(
+            f"""SELECT role, count(*) AS calls,
+                       coalesce(sum(prompt_tokens), 0)     AS prompt_tokens,
+                       coalesce(sum(completion_tokens), 0) AS completion_tokens,
+                       coalesce(sum(total_tokens), 0)      AS total_tokens,
+                       coalesce(sum(duration_ms), 0)       AS duration_ms
+                  FROM llm_call {where}
+                 GROUP BY role ORDER BY total_tokens DESC""", params)
+        by_stage = await self.fetchall(
+            f"""SELECT role, stage, count(*) AS calls,
+                       coalesce(sum(total_tokens), 0)      AS total_tokens
+                  FROM llm_call {where}
+                 GROUP BY role, stage ORDER BY total_tokens DESC""", params)
+        by_model = await self.fetchall(
+            f"""SELECT coalesce(model, '（未知）') AS model, count(*) AS calls,
+                       coalesce(sum(total_tokens), 0)      AS total_tokens
+                  FROM llm_call {where}
+                 GROUP BY model ORDER BY total_tokens DESC""", params)
+        return {"total": total or {}, "by_role": by_role, "by_stage": by_stage,
+                "by_model": by_model}
+
+    async def usage_by_conversation(self, limit: int = 30) -> list[dict]:
+        """按会话聚合的消耗 —— 「消耗清单」看整体时用。"""
+        return await self.fetchall(
+            """SELECT r.conversation_id,
+                      min(r.question)              AS question,
+                      count(DISTINCT r.global_task_id) AS runs,
+                      count(c.call_id)             AS calls,
+                      coalesce(sum(c.total_tokens), 0)      AS total_tokens,
+                      coalesce(sum(c.prompt_tokens), 0)     AS prompt_tokens,
+                      coalesce(sum(c.completion_tokens), 0) AS completion_tokens,
+                      max(c.created_at)            AS last_at
+                 FROM agent_run r JOIN llm_call c ON c.global_task_id = r.global_task_id
+                GROUP BY r.conversation_id
+                ORDER BY max(c.created_at) DESC
+                LIMIT %s""", (limit,))
 
     # ------------------------------------------------------------ 事件账本
 

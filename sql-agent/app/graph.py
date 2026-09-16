@@ -22,17 +22,48 @@ from contextlib import asynccontextmanager
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from . import agents, router
+from . import agents, catalog, router
 from .config import Settings
 from .db import BizDatabase
-from .ledger import Ledger, split_statements
+from .ledger import Ledger
 from .llm import build_llm
 from .runtime import EventBus, Runtime
 from .state import TaskState
 
 logger = logging.getLogger(__name__)
 
-AGENT_NODES = ("planner", "generator", "validator", "executor", "fixer", "reviewer")
+# 状态增量落库时的体积上限。**刻意只裁长度、不裁结构** ——
+# 这个事件是给人看"真实数据结构"用的，砍掉键名就等于又变成一句总结了。
+_DELTA_MAX_LIST = 20
+_DELTA_MAX_STR = 1500
+# EXPLAIN 的执行计划树层级不浅，深度限太死会把最有价值的部分砍掉
+# （早期设 5，结果 `plans` 里直接变成「层级过深」）。这里改用**节点总预算**兜底：
+# 既不按深度误伤结构，又能防住病态膨胀。
+_DELTA_MAX_DEPTH = 12
+_DELTA_MAX_NODES = 3000
+
+
+def _slim(value, depth: int = 0, budget: list | None = None):
+    """把状态增量压到可落库的体量，但保留完整结构（键名、嵌套关系一个不少）。"""
+    if budget is None:
+        budget = [_DELTA_MAX_NODES]
+    budget[0] -= 1
+    if budget[0] <= 0:
+        return "…（结构过大，其余已省略）"
+    if depth > _DELTA_MAX_DEPTH:
+        return "…（层级过深，已省略）"
+    if isinstance(value, dict):
+        return {k: _slim(v, depth + 1, budget) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        items = [_slim(v, depth + 1, budget) for v in list(value)[:_DELTA_MAX_LIST]]
+        if len(value) > _DELTA_MAX_LIST:
+            items.append(f"…（共 {len(value)} 项，这里只留前 {_DELTA_MAX_LIST} 项）")
+        return items
+    if isinstance(value, str) and len(value) > _DELTA_MAX_STR:
+        return value[:_DELTA_MAX_STR] + f"…（共 {len(value)} 字，已截断）"
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    return str(value)
 
 
 def _with_config(fn):
@@ -73,19 +104,29 @@ class Orchestrator:
     # ------------------------------------------------------------ 启动
 
     async def migrate(self, reset: bool = False) -> dict:
-        """建两边的表：agent_sql 的系统表 + cs_v1 的业务表（含授权）。"""
+        """启动时的**最小**准备：保证 agent_sql 里的账本表存在。
+
+        **不碰 cs_v1**，也**不读 cs_v1 的表结构** ——
+        表清单来自**外部数据文件** `config/tables.json`（`TABLES_FILE` 可指到别处），
+        不是从库里查出来的。
+        理由：一旦去读库，系统就会"发现"表被改名/删除并自动改口，
+        修正智能体永远等不到执行器抛出的那个真实报错，也就测不出它能不能处理。
+
+        早期版本还在这里无条件执行 `sql/biz.sql`（含 `CREATE TABLE IF NOT EXISTS`），
+        于是「手动删掉/改名一张业务表做测试」会在重启后被悄悄改回来。
+        建业务表是 `scripts/init_db.py` 的职责，服务启动不做这件事。
+        """
         await self.db.open()
         dropped = await self.ledger.reset() if reset else []
+
+        # 表目录来自外部数据文件（可动态更换），不在代码里写死
+        catalog.load(self.settings.tables_file or None)
 
         ledger_sql = self.settings.ledger_schema_path.read_text(encoding="utf-8")
         n_ledger = await self.ledger.apply_schema(ledger_sql)
 
-        biz_sql = self.settings.biz_schema_path.read_text(encoding="utf-8")
-        n_biz = await self.db.apply_script(biz_sql, split_statements)
-
-        await self.rt.refresh_schema()
         return {"dropped": dropped, "ledger_statements": n_ledger,
-                "biz_statements": n_biz, "tables": sorted(self.rt.allowed_tables)}
+                "tables": catalog.names(), "catalog_source": catalog.source_path()}
 
     def compile(self, saver=None) -> None:
         self._saver = saver
@@ -121,14 +162,45 @@ class Orchestrator:
                  "reason": reason, "model_wanted": want,
                  "overridden": bool(want and want != nxt)},
                 version=state.get("version", 0), round_no=state.get("round", 0))
-            return {"route": nxt, "route_reason": reason}
+            # 「停止重试 / 无法修复」必须单独冒出来 —— 否则用户根本不知道系统卡住了
+            if reason.startswith("停止重试") or "无法修复" in reason:
+                await rt.emit(run_id, "router", "stalled",
+                              {"reason": reason, "attempts": state.get("attempts") or [],
+                               "to": nxt},
+                              version=state.get("version", 0), round_no=state.get("round", 0))
+            return {"route": nxt}
 
-        builder.add_node("planner", _with_config(node_planner))
-        builder.add_node("generator", _with_config(node_generator))
-        builder.add_node("validator", _with_config(node_validator))
-        builder.add_node("executor", _with_config(node_executor))
-        builder.add_node("fixer", _with_config(node_fixer))
-        builder.add_node("reviewer", _with_config(node_reviewer))
+        def traced(role: str, fn):
+            """包一层：把节点**真正 return 出去的状态增量**记成事件。
+
+            别把它和节点里的 `rt.emit` 混为一谈 —— **两者都是这个节点自己写的**，
+            差别不在"真假"，而在**完整度**：
+
+              · `rt.emit` 写的是它挑出来给人看的那几个字段（plan / sql / check …）；
+              · 这里写的是它 `return` 出去的**完整结构**，也就是下一个智能体真正读到的东西
+                —— 包括那些它从来没广播过的字段（`checks: None`、`attempts`、
+                `history`、`version`、`confirmed` …）。
+
+            这才是「智能体之间真实传过去的内容」。
+            """
+            async def run(state):
+                out = await fn(state)
+                try:
+                    await rt.emit(state["global_task_id"], role, "state_delta",
+                                  {"keys": sorted(out), "delta": _slim(out)},
+                                  version=state.get("version", 0),
+                                  round_no=state.get("round", 0))
+                except Exception:  # noqa: BLE001
+                    logger.exception("记录状态增量失败：%s", role)
+                return out
+            return run
+
+        builder.add_node("planner", _with_config(traced("planner", node_planner)))
+        builder.add_node("generator", _with_config(traced("generator", node_generator)))
+        builder.add_node("validator", _with_config(traced("validator", node_validator)))
+        builder.add_node("executor", _with_config(traced("executor", node_executor)))
+        builder.add_node("fixer", _with_config(traced("fixer", node_fixer)))
+        builder.add_node("reviewer", _with_config(traced("reviewer", node_reviewer)))
         builder.add_node("router", node_router)
 
         builder.add_edge(START, "planner")
@@ -145,13 +217,48 @@ class Orchestrator:
 
     # ------------------------------------------------------------ 运行
 
-    async def create_run(self, question: str) -> dict:
+    async def create_run(self, question: str, conversation_id: str | None = None) -> dict:
+        """新建一轮。
+
+        传 `conversation_id` 就是**在同一个会话里追问**（多轮对话）；
+        不传就是新会话。
+        """
         run_id = str(uuid.uuid4())
-        run = await self.ledger.create_run(run_id, question, self.settings.max_rounds)
+        if conversation_id:
+            turn = await self.ledger.next_turn(conversation_id)
+        else:
+            conversation_id, turn = run_id, 1
+        run = await self.ledger.create_run(run_id, question, self.settings.max_rounds,
+                                           conversation_id=conversation_id, turn=turn)
         await self.rt.emit(run_id, "system", "run_created",
-                           {"question": question, "tables": sorted(self.rt.allowed_tables)},
+                           {"question": question,
+                            "conversation_id": conversation_id, "turn": turn,
+                            "tables": sorted(self.rt.allowed_tables),
+                            "catalog": catalog.tier1_text()},
                            version=run["version"])
         return run
+
+    async def _prior_turns(self, conversation_id: str, run_id: str) -> list[dict]:
+        """前几轮的摘要，给规划器当**多轮上下文**。
+
+        光有上一轮的问题不够 —— 追问常常是「那再按城市分组看看」这种，
+        规划器需要知道**上一轮实际跑了什么 SQL**，才知道"再"指的是什么。
+        """
+        turns = await self.ledger.list_turns(conversation_id)
+        out: list[dict] = []
+        for t in turns:
+            tid = str(t["global_task_id"])
+            if tid == run_id:
+                continue
+            audit = await self.ledger.list_audit(tid)
+            done = [a for a in audit if a.get("stage") == "executed"]
+            out.append({
+                "第几轮": t.get("turn"),
+                "用户问": t.get("question"),
+                "结果": t.get("status"),
+                "实际执行的 SQL": [a.get("sql_text") for a in done][:3] or "（没有执行任何语句）",
+            })
+        return out
 
     def _config(self, run_id: str) -> dict:
         return {"configurable": {"thread_id": run_id}}
@@ -188,10 +295,17 @@ class Orchestrator:
         state: TaskState = {
             "global_task_id": run_id,
             "question": run["question"],
-            "schema_text": self.rt.schema_text,
+            "conversation_id": str(run.get("conversation_id") or run_id),
+            "turn": int(run.get("turn") or 1),
+            "prior_turns": await self._prior_turns(
+                str(run.get("conversation_id") or run_id), run_id),
+            "mode": "", "safety": "", "chat_reply": "",
             "status": "created", "version": run["version"], "round": 0,
             "intents": [], "cursor": 0, "history": [],
+            # 共享记忆（执行器写过才有的「带来源的事实」）与复查进度
+            "memory": [], "replanned_cursor": -1, "plan_note": "",
             "draft": None, "verdict": None, "checks": None, "result": None,
+            "explain": None,
             "confirmed": False,
         }
         try:
@@ -229,7 +343,6 @@ class Orchestrator:
         values = (await self.graph.aget_state(config)).values or {}
         status = values.get("status", "done")
         version = values.get("version", 0)
-        report = values.get("consistency") or {}
         reason = ("审查通过，且运行时一致性校验全部 pass" if status == "done"
                   else "存在未通过的一致性问题，已如实说明")
         await self.rt.emit(run_id, "system", "done",
@@ -257,8 +370,11 @@ async def build_orchestrator(settings: Settings, reset: bool = False):
     orch = Orchestrator(settings)
     await orch.ledger.open()
     info = await orch.migrate(reset=reset)
-    logger.info("数据库就绪：账本 %s 条语句 · 业务库 %s 条语句 · 可访问表 %s",
-                info["ledger_statements"], info["biz_statements"], info["tables"])
+    logger.info("账本就绪：%s 条语句（agent_sql）· 表目录：%s（%s）",
+                info["ledger_statements"], "、".join(info["tables"]),
+                info.get("catalog_source") or "默认")
+    logger.info("注意：启动**不修改也不读取** cs_v1 的表结构；"
+                "建表请显式执行 scripts/init_db.py")
 
     saver_cm = None
     saver = None

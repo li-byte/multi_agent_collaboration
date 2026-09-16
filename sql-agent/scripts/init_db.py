@@ -1,9 +1,13 @@
-"""演示用的示例问题。
+"""初始化演示环境：建受限角色 + 建两个库的表 + 灌种子数据 + 准备 checkpoint。
 
-用法：
-    python scripts/init_db.py            # 建两个库的表 + 建受限角色
-    python scripts/init_db.py --reset    # 先删系统表再建
-    python scripts/init_db.py --seed     # 重灌业务库种子数据
+用法（**先确认 agent_sql 与 cs_v1 两个库已经存在**，这个脚本不建库）：
+    python scripts/init_db.py            # 建角色 + 建表（已存在的表不动）
+    python scripts/init_db.py --seed     # 另外重灌业务库的演示数据
+    python scripts/init_db.py --reset    # 先删光 agent_sql 里的账本表再重建（并重灌种子）
+
+会碰什么、不会碰什么：
+    · 会：cs_v1 建 4 张业务表 + 授权；agent_sql 建账本表；集群级建受限角色
+    · 不会：建数据库本身；也不会碰 cs_v1 的表结构（`--seed` 才会 TRUNCATE 业务数据）
 """
 
 from __future__ import annotations
@@ -74,7 +78,8 @@ async def main() -> int:
             print("[2/4] 跳过删除系统表（要重建加 --reset）")
         sql = settings.ledger_schema_path.read_text(encoding="utf-8")
         n = await ledger.apply_schema(sql)
-        print(f"      系统表就绪（{n} 条语句）：agent_run / agent_task / agent_event / sql_audit")
+        print(f"      系统表就绪（{n} 条语句）：agent_run / agent_task / agent_event / "
+              f"sql_audit / agent_memory / llm_call")
     finally:
         await ledger.close()
 
@@ -88,8 +93,8 @@ async def main() -> int:
         print(f"[3/4] 业务表就绪（{n} 条语句）：customers / products / orders / order_items")
 
         if seed:
-            seed_sql = (settings.project_root + "/sql/seed.sql")
-            n = await db.apply_script(Path(seed_sql).read_text(encoding="utf-8"), split_statements)
+            seed_sql = Path(settings.project_root) / "sql" / "seed.sql"
+            n = await db.apply_script(seed_sql.read_text(encoding="utf-8"), split_statements)
             print(f"      种子数据已重灌（{n} 条语句）")
 
         identity = await db.runner_identity()

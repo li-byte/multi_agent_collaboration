@@ -46,6 +46,7 @@ ESCALATION_ATTEMPTS: list[str] = [
 
 AGENT_SQL_CASES: list[tuple[str, str, bool]] = [
     ("读项目系统表",   "SELECT * FROM agent_run", False),
+    ("读消耗明细表",   "SELECT * FROM llm_call", False),
     ("改项目系统表",   "UPDATE agent_task SET status = 'hacked'", False),
     ("删审计表",       "DROP TABLE sql_audit", False),
 ]

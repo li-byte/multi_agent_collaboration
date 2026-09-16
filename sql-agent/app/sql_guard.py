@@ -68,7 +68,15 @@ FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
     (r"\bpg_sleep\b", "阻塞等待"),
 ]
 
-_TABLE_RE = re.compile(r"\b(?:from|join|update|into)\s+(?:only\s+)?([a-zA-Z_]\w*)", re.I)
+# 允许显式写的 schema（不写就走 search_path）
+ALLOWED_SCHEMAS = {"public"}
+
+# 抓 from/join/update/into 后面的表名，**同时抓可选的 schema 前缀**
+_TABLE_RE = re.compile(
+    r"\b(?:from|join|update|into)\s+(?:only\s+)?"
+    r"(?:(?P<schema>[a-zA-Z_]\w*)\s*\.\s*)?(?P<table>[a-zA-Z_]\w*)",
+    re.I,
+)
 _CTE_RE = re.compile(r"\b([a-zA-Z_]\w*)\s+as\s*\(", re.I)
 _SELECT_INTO_RE = re.compile(r"\bselect\b[\s\S]*?\binto\b", re.I)
 _WHERE_RE = re.compile(r"\bwhere\b", re.I)
@@ -93,16 +101,6 @@ class SqlVerdict:
     @property
     def needs_confirm(self) -> bool:
         return self.level == "需确认"
-
-    @property
-    def is_read(self) -> bool:
-        return self.level == "只读"
-
-    def summary(self) -> str:
-        bits = [f"类型 {self.action}", f"风险 {self.level}"]
-        if self.tables:
-            bits.append("涉及表 " + "、".join(self.tables))
-        return " · ".join(bits)
 
 
 # ---------------------------------------------------------------- 文本预处理
@@ -179,22 +177,91 @@ def has_top_level_where(sql: str) -> bool:
     return bool(_WHERE_RE.search(flat))
 
 
-def extract_tables(sql: str) -> list[str]:
-    """粗提涉及的表名（排除 CTE 名）。用于白名单校验。"""
+def extract_refs(sql: str) -> tuple[list[str], list[str]]:
+    """返回 (表名列表, 非法的 schema 前缀列表)。
+
+    `FROM public.products` 必须提取出表名 `products` 而不是 `public` ——
+    早期版本没处理 schema 前缀，把 `public` 当成了表名，于是
+    「修正智能体给表名加上 public. 前缀」这种**本来合理的修正**被误判成越权，
+    导致它在同一个地方反复打转、最后轮次耗尽。
+    """
     flat = strip_literals(sql)
     ctes = {m.group(1).lower() for m in _CTE_RE.finditer(flat)}
-    found: list[str] = []
+    tables: list[str] = []
+    bad_schemas: list[str] = []
     for m in _TABLE_RE.finditer(flat):
-        name = m.group(1)
-        low = name.lower()
+        schema = (m.group("schema") or "").strip()
+        table = m.group("table")
+        if schema and schema.lower() not in ALLOWED_SCHEMAS:
+            if schema.lower() not in bad_schemas:
+                bad_schemas.append(schema.lower())
+            continue
+        low = table.lower()
         if low in ctes or low in {"select", "values", "set"}:
             continue
-        if name not in found:
-            found.append(name)
-    return found
+        if table not in tables:
+            tables.append(table)
+    return tables, bad_schemas
+
+
+# ---------------------------------------------------------------- 用户输入体检
+
+# 用户**只能通过提问**引导智能体；输入里夹带 SQL 一律按危险操作处理。
+# 这条是硬规则，所以放在运行时（确定性），不指望模型自觉。
+_SQL_HEAD = re.compile(
+    r"\b(select|insert|update|delete|drop|truncate|alter|create|grant|revoke)\b", re.I)
+_SQL_STRUCT = re.compile(
+    r"\b(from|into|set|table|database|index|view|where|values|schema|join)\b", re.I)
+
+
+def find_user_sql(text: str) -> str:
+    """用户消息里是否夹带了 SQL；夹带了就返回那段原文（截断），否则返回空串。
+
+    判定用「动词 + 结构词」两条同时命中，避免把英文散文里的 select / update 误判。
+    正常的中文提问（「查一下北京客户的订单总额」）不会命中。
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    head = _SQL_HEAD.search(t)
+    if not head:
+        return ""
+    if _SQL_STRUCT.search(t) or ";" in t:
+        return t[:160]
+    return ""
 
 
 # ---------------------------------------------------------------- 主入口
+
+def check_intent_tables(sql: str, intent_tables: list[str] | None) -> tuple[bool, str]:
+    """SQL 涉及的表必须落在**生成器选定的表**里。
+
+    （这份清单由生成器的第一层「选表」步骤产出，修正智能体只能继承、不能扩大。）
+
+    为什么必须拦这一条：
+      模型发现 `products` 不存在、旁边恰好有个同构的 `products1`，
+      就会「顺手」把表名换掉 —— 看起来查询成功了，
+      **实际回答的是另一个问题**。这比查不出来危险得多：
+      用户拿到的是 products1 的数据，却以为是 products 的。
+
+    确实需要别的表？走「重新选表 / 重新拆任务」这条正式路径，
+    而不是在执行前偷偷换掉。
+
+    另外，系统内置目录（`app/catalog.py`）已经是一道更硬的墙：
+    目录里没有的表，在 `analyze()` 阶段就会被判「未授权」。
+    这里再拦一道，防的是「目录里有、但这次任务不该用」的表。
+    """
+    want = {t.lower() for t in (intent_tables or []) if t}
+    if not want:
+        return True, "生成器未选定表，跳过该检查"
+    got, _ = extract_refs(sql)
+    extra = sorted({t for t in got if t.lower() not in want})
+    if not extra:
+        return True, "只用了生成器选定的表：" + "、".join(sorted(want))
+    return False, (f"生成器只选定了 {'、'.join(sorted(want))}，SQL 还用了 {'、'.join(extra)}；"
+                   f"**不允许为了绕开「表不存在」而更换表名** —— 那等于换了问题。"
+                   f"确实需要别的表，请退回重新选表")
+
 
 def analyze(sql: str, allowed_tables: set[str] | None = None) -> SqlVerdict:
     """对一条 SQL 做静态风险判定。"""
@@ -242,15 +309,22 @@ def analyze(sql: str, allowed_tables: set[str] | None = None) -> SqlVerdict:
         return SqlVerdict(level="禁止", action=action,
                           reasons=["SELECT ... INTO 会创建新表，已拒绝"])
 
-    # ⑤ 表名白名单
-    tables = extract_tables(single)
+    # ⑤ 表名白名单（含 schema 前缀校验）
+    tables, bad_schemas = extract_refs(single)
     notes: list[str] = []
+    if bad_schemas:
+        return SqlVerdict(
+            level="禁止", action=action, tables=tables,
+            reasons=[f"不允许访问 schema：{'、'.join(bad_schemas)}；"
+                     f"只能访问 public 下的表，且**不要写 schema 前缀**"],
+        )
     if allowed_tables:
         unknown = [t for t in tables if t.lower() not in {x.lower() for x in allowed_tables}]
         if unknown:
             return SqlVerdict(
                 level="禁止", action=action, tables=tables,
-                reasons=[f"访问了未授权的表：{'、'.join(unknown)}。只允许 {'、'.join(sorted(allowed_tables))}"],
+                reasons=[f"访问了未授权的表：{'、'.join(unknown)}；"
+                         f"只允许 {'、'.join(sorted(allowed_tables))}（**不要写 schema 前缀**）"],
             )
     if not tables:
         notes.append("没能识别出涉及的表，执行前请人工确认")

@@ -54,11 +54,15 @@ class BizDatabase:
         )
         await self._admin.open(wait=True, timeout=20)
 
-        # 受限连接：给每条语句上超时，兜住「跑一个超慢查询」这类滥用
+        # 受限连接：
+        #   · statement_timeout 兜住「跑一个超慢查询」这类滥用
+        #   · **显式固定 search_path=public**，不依赖角色默认值 ——
+        #     之前出现过 `relation "products" does not exist` 而表明明存在，
+        #     根因就是执行连接的 search_path 不可控。固定住它，这类问题从根上消失。
         self._runner = AsyncConnectionPool(
             conninfo=self._runner_dsn, min_size=1, max_size=4, open=False,
             kwargs={"row_factory": dict_row, "autocommit": True,
-                    "options": f"-c statement_timeout={self._timeout_ms}"},
+                    "options": f"-c statement_timeout={self._timeout_ms} -c search_path=public"},
         )
         await self._runner.open(wait=True, timeout=20)
 

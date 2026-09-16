@@ -1,0 +1,77 @@
+{
+  "_comment": [
+    "智能体关于「库里有什么」的全部依据 —— 表、字段、关系都写在这里，不写在代码里。",
+    "改这个文件即可换一套表，代码一行都不用动；服务里改完 POST /api/catalog/reload 立即生效。",
+    "路径可用环境变量 TABLES_FILE 指向别处（例如按租户/环境切换）。",
+    "",
+    "字段说明：",
+    "  summary    第一层：一句话描述（生成器『选表』时只看得到这个）",
+    "  notes      第二层：补充说明",
+    "  columns[].type      字段类型（给人看的，不参与解析）",
+    "  columns[].desc      字段说明",
+    "  columns[].pk        是否主键",
+    "  columns[].nullable  是否可空",
+    "  columns[].enum      取值枚举（可选）",
+    "  columns[].ref       外键指向，形如 orders.id（可选）",
+    "  columns[].on_delete CASCADE / RESTRICT（可选）"
+  ],
+  "tables": [
+    {
+      "name": "customers",
+      "summary": "客户档案：姓名、电话、所在城市、会员等级",
+      "notes": "一个客户可以有多张订单。要按城市/等级筛客户，先看这张表。",
+      "columns": [
+        {"name": "id", "type": "INT", "desc": "客户 ID", "pk": true},
+        {"name": "name", "type": "TEXT", "desc": "客户姓名"},
+        {"name": "phone", "type": "TEXT", "desc": "联系电话", "nullable": true},
+        {"name": "city", "type": "TEXT", "desc": "所在城市",
+         "enum": ["北京", "上海", "广州", "深圳"]},
+        {"name": "level", "type": "TEXT", "desc": "会员等级",
+         "enum": ["普通", "银牌", "金牌"]},
+        {"name": "created_at", "type": "TIMESTAMPTZ", "desc": "建档时间"}
+      ]
+    },
+    {
+      "name": "products",
+      "summary": "商品档案：名称、分类、单价、库存",
+      "notes": "库存低于 10 属于低库存，演示里常用来做补货场景。",
+      "columns": [
+        {"name": "id", "type": "INT", "desc": "商品 ID", "pk": true},
+        {"name": "name", "type": "TEXT", "desc": "商品名称"},
+        {"name": "category", "type": "TEXT", "desc": "商品分类",
+         "enum": ["外设", "显示", "配件", "音频", "存储", "影音"]},
+        {"name": "price", "type": "NUMERIC(10,2)", "desc": "单价（元）"},
+        {"name": "stock", "type": "INT", "desc": "当前库存数量（可能为 0）"}
+      ]
+    },
+    {
+      "name": "orders",
+      "summary": "订单主表：哪个客户下的、什么状态、总金额、什么时候下的",
+      "notes": "订单只记总金额；要按商品维度统计必须 JOIN order_items。",
+      "columns": [
+        {"name": "id", "type": "INT", "desc": "订单 ID", "pk": true},
+        {"name": "customer_id", "type": "INT", "desc": "下单客户",
+         "ref": "customers.id"},
+        {"name": "status", "type": "TEXT", "desc": "订单状态",
+         "enum": ["待付款", "已付款", "已发货", "已完成", "已取消"]},
+        {"name": "total_amount", "type": "NUMERIC(12,2)", "desc": "订单总金额（元）"},
+        {"name": "created_at", "type": "TIMESTAMPTZ", "desc": "下单时间"}
+      ]
+    },
+    {
+      "name": "order_items",
+      "summary": "订单明细：每张订单包含哪些商品、几件、成交单价",
+      "notes": "删订单会**级联删掉**它的明细（order_items.order_id 上是 ON DELETE CASCADE）。",
+      "columns": [
+        {"name": "id", "type": "INT", "desc": "明细 ID", "pk": true},
+        {"name": "order_id", "type": "INT", "desc": "所属订单",
+         "ref": "orders.id", "on_delete": "CASCADE"},
+        {"name": "product_id", "type": "INT", "desc": "商品",
+         "ref": "products.id"},
+        {"name": "qty", "type": "INT", "desc": "购买数量"},
+        {"name": "unit_price", "type": "NUMERIC(10,2)",
+         "desc": "成交单价（元，可能不等于商品现价）"}
+      ]
+    }
+  ]
+}

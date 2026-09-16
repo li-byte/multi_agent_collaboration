@@ -42,6 +42,12 @@
   .sess.on { border-color:#2563eb; box-shadow:0 0 0 2px #dbeafe inset; }
   .sess .t { font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .sess .m { font-size:10.5px; color:var(--muted); display:flex; gap:5px; margin-top:3px; flex-wrap:wrap; }
+  .sess .imp { font-size:10.5px; font-weight:600; border-radius:4px; padding:0 5px; }
+  .sess .imp.write { background:#fef3c7; color:#92400e; }
+  .sess .imp.read  { background:#dbeafe; color:#1d4ed8; }
+  .sess .imp.wait  { background:#ffedd5; color:#9a3412; }
+  .sess .imp.none  { background:#f3f4f6; color:#6b7280; }
+  .sess .imp.bad   { background:#fee2e2; color:#991b1b; }
 
   .main { flex:1; display:flex; flex-direction:column; min-width:0; }
   .chat-scroll { flex:1; overflow:auto; }
@@ -141,8 +147,98 @@
   .mini:hover { background:#f3f4f6; }
   .win-body { flex:1; overflow:auto; padding:16px; }
   .empty { color:var(--muted); font-size:12.5px; text-align:center; padding:22px 8px; }
-  .tbl { border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-bottom:10px; background:#fbfdff; }
-  .tbl .hd { font-size:12.5px; font-weight:700; color:#0f766e; margin-bottom:4px; }
+  /* ---------- 消耗清单 ---------- */
+  .use-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
+  .use-card { border:1px solid var(--line); border-left-width:4px; border-radius:9px;
+              padding:10px 12px; background:#fbfdff; }
+  .use-card .k { font-size:11.5px; color:var(--muted); }
+  .use-card .v { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums;
+                 margin:2px 0 1px; color:#0f172a; }
+  .use-card .d { font-size:11px; color:#94a3b8; }
+  .use-card.c1 { border-left-color:#4f46e5; } .use-card.c1 .v { color:#4f46e5; }
+  .use-card.c2 { border-left-color:#0891b2; } .use-card.c2 .v { color:#0891b2; }
+  .use-card.c3 { border-left-color:#db2777; } .use-card.c3 .v { color:#db2777; }
+  .use-card.c4 { border-left-color:#0f766e; } .use-card.c4 .v { color:#0f766e; }
+  .use-sec { font-size:12.5px; font-weight:700; color:#334155; margin:16px 0 2px;
+             padding-left:7px; border-left:3px solid #94a3b8; }
+  .bar-mini { display:flex; align-items:center; gap:6px; }
+  .bar-mini i { display:block; height:7px; border-radius:4px; background:#5eead4; min-width:2px; }
+  .bar-mini span { font-size:10.5px; color:#64748b; font-variant-numeric:tabular-nums; }
+
+  /* 时序图 */
+  .legend { display:flex; gap:16px; font-size:12px; color:var(--muted); padding-bottom:10px; flex-wrap:wrap; }
+  .legend i { display:inline-block; width:22px; height:0; border-top:2px solid #64748b;
+              vertical-align:middle; margin-right:5px; }
+  .legend i.red { border-top:2px dashed #dc2626; }
+  .legend i.grn { border-top:2px solid #16a34a; }
+  .legend i.amb { border-top:2px dashed #d97706; }
+  #seq-canvas { display:inline-block; min-width:100%; }
+
+  /* ---------- 数据流转链路 ---------- */
+  .flow { display:flex; flex-direction:column; gap:10px; }
+  .flow-bar { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:#374151;
+              background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:9px 12px; }
+  .flow-bar b { color:#0f172a; font-variant-numeric:tabular-nums; }
+  .flow-start { font-size:12px; color:#334155; background:#eff6ff; border:1px solid #bfdbfe;
+                border-radius:8px; padding:9px 12px; }
+  .hop { border:1px solid #e5e7eb; border-radius:10px; background:#fff; overflow:hidden; }
+  .hop.ovr { border-color:#f59e0b; }
+  .hop-hd { display:flex; align-items:center; gap:7px; padding:8px 12px; background:#f9fafb;
+            border-bottom:1px solid #eef2f7; font-size:13px; }
+  .hop.ovr .hop-hd { background:#fffbeb; }
+  .hop-n { font-size:11px; color:#94a3b8; font-variant-numeric:tabular-nums; min-width:16px; }
+  .face { width:20px; height:20px; border-radius:5px; color:#fff; font-size:11px; flex:none;
+          display:inline-flex; align-items:center; justify-content:center; }
+  .arrow { color:#94a3b8; }
+  .badge { margin-left:auto; font-size:11px; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .badge.ok { background:#dcfce7; color:#166534; }
+  .badge.ovr { background:#fef3c7; color:#92400e; font-weight:600; }
+  .hop-bd { padding:9px 12px; display:flex; flex-direction:column; gap:7px; }
+  .ovr-box { background:#fffbeb; border-left:3px solid #f59e0b; padding:7px 10px;
+             font-size:12px; border-radius:0 6px 6px 0; line-height:1.7; }
+  .ovr-box .strike { color:#b45309; text-decoration:line-through; }
+  .fi { font-size:12px; }
+  .fi-k { font-size:11px; color:#64748b; letter-spacing:.04em; margin-bottom:3px; }
+  .fi-k b { color:#334155; }
+  .fi-line { color:#334155; line-height:1.7; }
+  .fi-dim { color:#94a3b8; }
+  .fi-bad { color:#b91c1c; }
+  .fi-pre { margin:3px 0 0; padding:7px 9px; background:#0f172a; color:#e2e8f0; border-radius:6px;
+            font-family:ui-monospace,Consolas,monospace; font-size:11.5px; white-space:pre-wrap;
+            word-break:break-all; }
+  .flow-end { text-align:center; font-size:12px; color:#475569; padding:8px;
+              background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; }
+
+  /* ---------- 汇总答复里的 Markdown ---------- */
+  .md-h { font-size:13.5px; font-weight:700; color:#0f172a; margin:11px 0 5px; }
+  .md-p { font-size:13.5px; line-height:1.75; color:#1f2937; margin:3px 0; }
+  .md-ul { margin:4px 0 4px 20px; padding:0; font-size:13.5px; color:#1f2937; }
+  .md-ul li { margin:2px 0; line-height:1.7; }
+  .md code { background:#f1f5f9; color:#0f172a; padding:1px 5px; border-radius:4px;
+             font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  table.md { margin:8px 0 4px; }
+  table.md td, table.md th { font-variant-numeric:tabular-nums; }
+
+  /* ---------- 多轮对话的轮次分隔 ---------- */
+  .turnsep { display:flex; align-items:center; gap:10px; margin:14px 4px 4px; }
+  .turnsep::before, .turnsep::after { content:''; flex:1; height:1px; background:#e2e8f0; }
+  .turnsep span { font-size:11px; color:#94a3b8; white-space:nowrap; }
+
+  /* ---------- 原始结构（真实传过去的内容） ---------- */
+  .raw { margin-top:9px; border-top:1px dashed #e2e8f0; padding-top:8px; }
+  .raw > summary { cursor:pointer; font-size:11.5px; color:#475569; }
+  .raw > summary:hover { color:#0f172a; }
+  .raw-ev { margin-top:8px; }
+  .raw-ev + .raw-ev { border-top:1px solid #f1f5f9; padding-top:8px; }
+  .raw-hd { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+            font-size:11px; color:#334155; }
+  .raw-seq { color:#94a3b8; font-variant-numeric:tabular-nums; }
+  .raw-pre { margin:4px 0 0; padding:9px 11px; background:#0f172a; color:#cbd5e1;
+             border-radius:7px; font-family:ui-monospace,Consolas,monospace;
+             font-size:11px; line-height:1.6; white-space:pre-wrap; word-break:break-word;
+             max-height:420px; overflow:auto; }
+  .delta-tag { background:#0ea5e9; color:#fff; font-size:10px; padding:1px 6px;
+               border-radius:999px; }
 </style>
 </head>
 <body>
@@ -152,12 +248,14 @@
   <div class="pills">
     <span class="pill" id="p-status">状态 <b>—</b></span>
     <span class="pill" id="p-round">轮次 <b>—</b></span>
+    <span class="pill" id="p-usage" title="本轮大模型消耗：调用次数与 token 合计（token 取自模型响应，不估算）">消耗 <b>—</b></span>
     <span class="pill" id="p-health">连接中…</span>
   </div>
   <div class="hbtns">
-    <button class="hbtn" id="btn-schema">🗂 表结构</button>
+    <button class="hbtn" id="btn-usage">💸 消耗清单</button>
     <button class="hbtn" id="btn-audit">🧾 SQL 审计</button>
-    <button class="hbtn" id="btn-route">🔀 协作链路</button>
+    <button class="hbtn" id="btn-flow">🔀 数据流转</button>
+    <button class="hbtn" id="btn-route">📊 时序图</button>
   </div>
 </header>
 
@@ -182,7 +280,10 @@
 <div class="overlay" id="info-overlay">
   <div class="win">
     <div class="bar"><b id="info-title">详情</b><span class="hint" id="info-hint"></span>
-      <div class="acts"><button class="mini" id="info-close">关闭 ✕</button></div></div>
+      <div class="acts">
+        <button class="mini" id="info-export" style="display:none">导出 SVG</button>
+        <button class="mini" id="info-close">关闭 ✕</button>
+      </div></div>
     <div class="win-body" id="info-body"></div>
   </div>
 </div>
@@ -192,32 +293,94 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const clip = (t, n) => { t = String(t ?? '').replace(/\s+/g,' ').trim(); return t.length > n ? t.slice(0,n-1)+'…' : t; };
 
+/* 极简 Markdown → HTML。
+   只支持我们**让审查器产出**的那几种：标题 / 加粗 / 行内代码 / 列表 / 表格。
+   关键是「先 esc 再套标签」—— 所以答复里就算夹了 HTML 也注入不进来。 */
+function mdToHtml(md) {
+  const inline = (s) => esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  const lines = String(md || '').replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const ln = lines[i];
+
+    // 表格：表头行 + |---|---| 分隔行 + 若干数据行
+    if (/^\s*\|.*\|\s*$/.test(ln) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const cells = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '')
+        .split('|').map((c) => c.trim());
+      const head = cells(ln);
+      i += 2;
+      const body = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { body.push(cells(lines[i])); i++; }
+      out.push(`<table class="grid md"><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead>`
+        + `<tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      continue;
+    }
+
+    const hd = ln.match(/^\s*#{1,6}\s+(.*)$/);
+    if (hd) { out.push(`<div class="md-h">${inline(hd[1])}</div>`); i++; continue; }
+
+    if (/^\s*(?:[-*+]|\d+\.)\s+/.test(ln)) {
+      const ordered = /^\s*\d+\.\s+/.test(ln);
+      const items = [];
+      while (i < lines.length && /^\s*(?:[-*+]|\d+\.)\s+/.test(lines[i])) {
+        items.push(`<li>${inline(lines[i].replace(/^\s*(?:[-*+]|\d+\.)\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<${ordered ? 'ol' : 'ul'} class="md-ul">${items.join('')}</${ordered ? 'ol' : 'ul'}>`);
+      continue;
+    }
+
+    if (!ln.trim()) { i++; continue; }
+    out.push(`<div class="md-p">${inline(ln)}</div>`);
+    i++;
+  }
+  return out.join('');
+}
+
 const AGENT = {
   planner:   { cn:'规划器',      face:'规', color:'var(--planner)',   busy:'正在理解你的问题…' },
   generator: { cn:'SQL 生成',    face:'生', color:'var(--generator)', busy:'正在写 SQL…' },
-  validator: { cn:'SQL 验证',    face:'验', color:'var(--validator)', busy:'正在验证 SQL…' },
+  validator: { cn:'SQL 校验',    face:'校', color:'var(--validator)', busy:'正在校验 SQL…' },
   executor:  { cn:'SQL 执行',    face:'执', color:'var(--executor)',  busy:'正在执行…' },
   fixer:     { cn:'SQL 修正',    face:'修', color:'var(--fixer)',     busy:'正在修正 SQL…' },
   reviewer:  { cn:'汇总审查',    face:'审', color:'var(--reviewer)',  busy:'正在汇总…' },
   router:    { cn:'路由护栏',    face:'路', color:'var(--router)',    busy:'' },
   system:    { cn:'系统',        face:'系', color:'var(--router)',    busy:'' },
+  done:      { cn:'结束',        face:'终', color:'#94a3b8',          busy:'' },
 };
 const A = (r) => AGENT[r] || AGENT.system;
-const STATUS_CN = { created:'已创建', planning:'规划中', generating:'生成中', validating:'验证中',
+const STATUS_CN = { created:'已创建', planning:'规划中', generating:'生成中', validating:'校验中',
                     confirming:'⏸ 等确认', executing:'执行中', fixing:'修正中',
                     reviewing:'审查中', done:'已完成', failed:'失败' };
 const statusCN = (s) => STATUS_CN[s] || s || '—';
 
 const store = { chat:[], blocks:[], folds:{}, runId:null, runInfo:{}, events:[], tasks:[],
-                audit:[], awaiting:null, finished:false, es:null, infoMode:null, schema:null };
+                audit:[], awaiting:null, finished:false, es:null, infoMode:null,
+                rawAll:false, conversationId:null, curBlock:{}, blockSeq:0,
+                // 消耗：本轮实时累加（来自 llm_call 事件）+ 打开面板时拉取的完整明细
+                usage:{ calls:0, prompt_tokens:0, completion_tokens:0, total_tokens:0,
+                        cached_tokens:0, duration_ms:0, failed:0 },
+                usageDetail:null, usageAll:null };
 
 /* ---------------- 事件 ---------------- */
-function ensure(role, round) {
-  const key = `${round}::${role}`;
-  let b = store.blocks.find((x) => x.key === key);
-  if (!b) { b = { kind:'agent', key, role, round, typing:true, items:[], summary:'' };
-            store.blocks.push(b); store.chat.push(b); }
+/* 气泡按「**一次节点调用**」分，不按角色分。
+   一个智能体在一次运行里会被叫到很多次（每个子任务一次、每次修正一次、复查一次）；
+   早先这里用 runId::round::role 做 key，于是**三个子任务的生成结果挤进同一个气泡** ——
+   看起来就像三个子任务"孤军奋战"、什么都没传下去。
+   现在 node_start 开一个新气泡并登记为该角色的"当前气泡"，它后续的事件都落进去。 */
+function newBlock(role, round) {
+  const key = `${store.runId || ''}::${role}::${round}::${++store.blockSeq}`;
+  const b = { kind:'agent', key, role, round, typing:true, items:[], summary:'' };
+  store.blocks.push(b); store.chat.push(b); store.curBlock[role] = key;
   return b;
+}
+function ensure(role, round) {
+  const cur = store.curBlock[role];
+  if (cur) { const b = store.blocks.find((x) => x.key === cur); if (b) return b; }
+  return newBlock(role, round);
 }
 function push(item) { store.chat.push(item); renderChat(); scrollDown(); }
 function scrollDown() {
@@ -237,10 +400,14 @@ function handleEvent(e) {
   const p = e.payload || {}, role = e.role, round = e.round ?? 0;
   switch (e.event_type) {
     case 'run_created':
-      store.runInfo = { question:p.question, status:'created', version:0, round:0, tables:p.tables||[] };
-      push({ kind:'sys', text:`开始。可访问的表：${(p.tables||[]).join('、')}` });
+      store.runInfo = { question:p.question, status:'created', version:0, round:0,
+                        turn:p.turn, conversation_id:p.conversation_id, tables:p.tables||[] };
+      if (p.conversation_id) store.conversationId = p.conversation_id;
+      push({ kind:'sys', text: (p.turn && p.turn > 1)
+        ? `第 ${p.turn} 轮 · 已带上前面几轮的上文`
+        : `开始。系统目录中的表：${(p.tables||[]).join('、')}` });
       break;
-    case 'node_start': ensure(role, round); break;
+    case 'node_start': newBlock(role, round); break;
     case 'node_end': {
       const b = ensure(role, round); b.typing = false; b.summary = p.summary || '';
       break;
@@ -248,13 +415,43 @@ function handleEvent(e) {
     case 'plan': {
       const b = ensure(role, round); b.typing = false;
       b.items.push({ type:'plan', understanding:p.understanding, reason:p.plan_reason,
-                     intents:p.intents||[], refusal:p.refusal });
+                     intents:p.intents||[], refusal:p.refusal,
+                     mode:p.mode, safety:p.safety,
+                     phase:p.phase, reviewNote:p.review_note, cursor:p.cursor,
+                     dropped:p.dropped||[], chatReply:p.chat_reply });
+      break;
+    }
+    case 'memory': {
+      // 执行器把一条「带来源的事实」写进共享记忆 —— 下游就是靠它接上前面的结果
+      const b = ensure(role, round); b.typing = false;
+      b.items.push({ type:'memory', claim:p.claim, sqlId:p.sql_id, rowcount:p.rowcount,
+                     entities:p.entities, verified:p.verified, saved:p.saved });
+      break;
+    }
+    case 'llm_call': {
+      // 每次大模型调用一条 —— 顶栏的「消耗」实时累加
+      const u = store.usage;
+      u.calls += 1;
+      u.prompt_tokens += p.prompt_tokens || 0;
+      u.completion_tokens += p.completion_tokens || 0;
+      u.total_tokens += p.total_tokens || 0;
+      u.cached_tokens += p.cached_tokens || 0;
+      u.duration_ms += p.duration_ms || 0;
+      if (p.ok === false) u.failed += 1;
+      store.usageDetail = null;      // 面板下次打开时重新拉
+      renderHeader();
       break;
     }
     case 'sql': {
       const b = ensure(role, round); b.typing = false;
       b.items.push({ type:'sql', stage:p.stage, draft:p.draft||{}, verdict:p.verdict||{},
                      whatChanged:p.what_changed });
+      break;
+    }
+    case 'tables': {
+      const b = ensure(role, round); b.typing = false;
+      b.items.push({ type:'tables', selected:p.selected||[], reason:p.reason,
+                     candidates:p.candidates||[] });
       break;
     }
     case 'check': { ensure(role, round).items.push({ type:'check', check:p }); break; }
@@ -293,6 +490,12 @@ function handleEvent(e) {
         `${p.status === 'done' ? '完成' : '结束'} · 共 ${(p.round ?? 0) + 1} 轮 · ${p.reason || ''}` });
       refreshDetail(); loadSessions();
       break;
+    case 'stalled':
+      push({ kind:'stalled', reason:p.reason || '', attempts:p.attempts || [] });
+      break;
+    case 'give_up':
+      push({ kind:'sys', bad:true, text:`修正智能体判断无法修复：${clip(p.reason, 120)}` });
+      break;
     case 'error':
       push({ kind:'sys', bad:true, text:`出错了：${clip(p.message, 130)}` });
       break;
@@ -305,24 +508,62 @@ function renderHeader() {
   const r = store.runInfo;
   $('p-status').innerHTML = `状态 <b>${esc(statusCN(r.status))}</b>`;
   $('p-round').innerHTML = `轮次 <b>第 ${(r.round ?? 0) + 1} 轮</b>`;
+  // 实时数字跟着 llm_call 事件累加；万一事件没收到（比如断线重连），
+  // 就用打开面板时拉到的那份总账兜底 —— 两个口径都来自同一张表。
+  const live = store.usage;
+  const fall = (store.usageDetail && store.usageDetail.total) || null;
+  const calls = live.calls || (fall ? fall.calls : 0);
+  const tokens = live.calls ? live.total_tokens : (fall ? fall.total_tokens : 0);
+  $('p-usage').innerHTML = calls
+    ? `消耗 <b>${calls}</b> 次 · <b>${fmtNum(tokens)}</b> tok`
+    : '消耗 <b>—</b>';
 }
+/** 大数字加千分位，几十万 token 一眼看得出量级 */
+function fmtNum(n) { return (n ?? 0).toLocaleString('en-US'); }
 async function loadHealth() {
   try {
     const h = await (await fetch('/api/health')).json();
-    const ok = h.ledger === 'ok' && h.runner === 'ok';
+    // 表目录是外部文件：路径写错 / JSON 写坏时，先把这件事顶到最前面
+    const catBad = h.catalog && h.catalog.error;
+    const ok = h.ledger === 'ok' && h.runner === 'ok' && !catBad;
     $('p-health').className = 'pill ' + (ok ? 'ok' : 'bad');
-    $('p-health').innerHTML =
-      `记录库 <b>${esc(h.ledger_db)}</b> · 执行库 <b>${esc(h.biz_db)}</b> · 身份 <b>${esc(h.runner_user)}</b>`;
+    $('p-health').innerHTML = catBad
+      ? `表目录加载失败：<b>${esc(clip(h.catalog.error, 60))}</b>`
+      : `记录库 <b>${esc(h.ledger_db)}</b> · 执行库 <b>${esc(h.biz_db)}</b> · 身份 <b>${esc(h.runner_user)}</b>`;
   } catch (e) { $('p-health').textContent = '服务不可达'; }
+}
+/** 会话列表的「改了什么数据」摘要 */
+function sessImpact(r) {
+  if (r.writes > 0) {
+    const t = (r.write_tables || []).join('、') || '数据';
+    return `<span class="imp write">✎ 改 ${esc(t)} ${r.affected} 行</span>`;
+  }
+  if (r.reads > 0) return '<span class="imp read">只读查询</span>';
+  if (r.status === 'confirming') return '<span class="imp wait">⏸ 等确认</span>';
+  if (r.status === 'failed') return '<span class="imp bad">未完成</span>';
+  return '<span class="imp none">未改动数据</span>';
+}
+function shortTime(iso) {
+  if (!iso) return '';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 async function loadSessions() {
   try {
     const rows = await (await fetch('/api/runs')).json();
     const box = $('sess-list');
     if (!rows.length) { box.innerHTML = '<div class="empty">暂无会话</div>'; return; }
-    box.innerHTML = rows.map((r) => `<div class="sess${r.global_task_id===store.runId?' on':''}" data-id="${esc(r.global_task_id)}">
+    box.innerHTML = rows.map((r) => `<div class="sess${r.conv_id===store.conversationId?' on':''}" data-id="${esc(r.conv_id)}">
       <div class="t">${esc(clip(r.question, 20))}</div>
-      <div class="m"><span>${esc(statusCN(r.status))}</span><span>第 ${r.round+1} 轮</span></div></div>`).join('');
+      <div class="m">${sessImpact(r)}</div>
+      <div class="m"><span>${esc(statusCN(r.status))}</span>
+        <span>${r.turns > 1 ? `${r.turns} 轮对话` : '单轮'}</span>
+        ${r.llm_calls ? `<span title="这个会话的大模型调用次数与 token 合计">💸 ${r.llm_calls} 次 · ${fmtNum(r.llm_tokens)} tok</span>` : ''}
+        <span style="margin-left:auto">${esc(shortTime(r.updated_at))}</span></div></div>`).join('');
     box.querySelectorAll('.sess').forEach((el) => { el.onclick = () => openSession(el.dataset.id); });
   } catch (e) {}
 }
@@ -336,18 +577,62 @@ async function loadSamples() {
 
 function renderItem(it, b) {
   if (it.type === 'plan') {
-    let h = `<div>${esc(it.understanding || '')}</div>`;
+    const MODE_CN = { chat:'打招呼 / 闲聊', execute:'正常执行' };
+    const risky = it.safety && it.safety !== '安全';
+    // 复查（phase != initial）是**回到规划器看一眼实际结果**，不是重新拆解 ——
+    // 混在一起看，就分不出「后面的计划到底有没有根据前面结果调整过」。
+    const isReplan = it.phase && it.phase !== 'initial';
+    const REPLAN_CN = { continue:'剩余计划不变，继续做', revise:'调整后续任务', finish:'信息已够，收尾' };
+    let h = '';
+    if (isReplan) {
+      h += `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px">
+        <span class="tag" style="background:#fef3c7;color:#92400e">🔁 规划器复查</span>
+        <span class="tag" style="background:#e0e7ff;color:#3730a3">${esc(REPLAN_CN[it.phase] || it.phase)}</span>
+      </div>`;
+      if (it.review_note) h += `<div>${esc(it.review_note)}</div>`;
+    } else {
+      h += `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px">
+        <span class="tag" style="background:#e0e7ff;color:#3730a3">模式：${esc(MODE_CN[it.mode] || it.mode || '正常执行')}</span>
+        ${risky ? `<span class="tag" style="background:#fee2e2;color:#991b1b">⚠ ${esc(it.safety)}</span>`
+                : '<span class="tag" style="background:#dcfce7;color:#166534">安全评估：安全</span>'}
+      </div>`;
+      h += `<div>${esc(it.understanding || '')}</div>`;
+    }
     if (it.refusal) {
       h += `<div class="verdict no">🚫 这个请求我不做<div class="why">${esc(it.refusal)}</div></div>`;
       return h;
     }
-    (it.intents || []).forEach((t) => {
-      h += `<div class="intent"><span class="id">${esc(t.sub_task_id)}</span> ${esc(t.intent)}
-        <span class="tag">${esc(t.kind)}</span>
-        <div class="ghost" style="font-size:11px;color:#6b7280">涉及表：${esc((t.tables||[]).join('、') || '—')}</div></div>`;
+    const done = it.cursor ?? 0;
+    (it.intents || []).forEach((t, i) => {
+      const mark = isReplan ? (i < done ? '✓ ' : '· ') : '';
+      h += `<div class="intent"><span class="id">${esc(t.sub_task_id)}</span> ${mark}${esc(t.intent)}
+        <span class="tag">${esc(t.kind)}</span>`;
+      if ((t.depends_on || []).length)
+        h += `<span class="d" style="font-size:11px;color:#7c3aed">依赖 ${esc(t.depends_on.join('、'))}</span>`;
+      h += `</div>`;
+      if (t.acceptance)
+        h += `<div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：${esc(t.acceptance)}</div>`;
     });
+    if (it.chatReply) h += `<div style="font-size:12.5px;color:#334155;margin-top:4px">${esc(it.chatReply)}</div>`;
+    if ((it.dropped || []).length)
+      h += `<div style="font-size:11.5px;color:#92400e;margin-top:4px">复查后判定不必再做：${esc(it.dropped.join('、'))}</div>`;
     if (it.reason) h += `<div style="font-size:11.5px;color:#6b7280;margin-top:4px">${esc(it.reason)}</div>`;
     return h;
+  }
+  if (it.type === 'memory') {
+    const ent = it.entities || {};
+    const vals = ent.values || [];
+    let h = `<div style="border-left:3px solid #0d9488;background:#f0fdfa;padding:6px 8px;border-radius:5px;margin:4px 0">
+      <div style="font-size:12px;font-weight:700;color:#0f766e">🧠 写入共享记忆
+        <span style="font-weight:400;color:#6b7280">· 只有真正执行过的才算事实</span></div>
+      <div style="font-size:12px;color:#334155;margin-top:2px">${esc(it.claim || '')}</div>
+      <div style="font-size:11.5px;color:#6b7280">
+        来源 sql_id=<b>${esc(it.sql_id ?? '—')}</b> · ${esc(it.rowcount ?? '?')} 行
+        ${it.verified ? '<span style="color:#166534">· 已核对（执行器验证）</span>' : ''}</div>`;
+    if (ent.key && vals.length)
+      h += `<div style="font-size:11.5px;color:#0f766e;margin-top:2px">可复用实体：${esc(ent.table)}.${esc(ent.key)} =
+        ${esc(vals.slice(0, 20).join('、'))}${vals.length > 20 ? ` …（共 ${vals.length} 个）` : ''}</div>`;
+    return h + `</div>`;
   }
   if (it.type === 'sql') {
     const v = it.verdict || {};
@@ -361,13 +646,18 @@ function renderItem(it, b) {
     if ((v.reasons || []).length) h += `<div style="font-size:11.5px;color:#dc2626">🚫 ${esc(v.reasons.join('；'))}</div>`;
     return h;
   }
+  if (it.type === 'tables') {
+    return `<div style="font-size:12px">🔍 第一层·选表：<b>${esc((it.selected||[]).join('、') || '—')}</b>
+      <div class="d" style="font-size:11.5px;color:#6b7280">${esc(it.reason || '')}</div>
+      <div class="d" style="font-size:11px;color:#9ca3af">候选：${esc((it.candidates||[]).join('、'))}</div></div>`;
+  }
   if (it.type === 'check') {
     const c = it.check;
     return `<div class="chk ${esc(c.result)}"><span class="mark">${c.result==='pass'?'✓':'✕'}</span>
       <span>${esc(c.item)}<div class="d">${esc(c.detail)}</div></span></div>`;
   }
   if (it.type === 'verdict') {
-    return `<div class="verdict ${it.v.passed ? 'ok':'no'}">${it.v.passed ? '✓ 验证通过':'✕ 验证不通过'}
+    return `<div class="verdict ${it.v.passed ? 'ok':'no'}">${it.v.passed ? '✓ 校验通过':'✕ 校验不通过'}
       ${it.v.forced_by_runtime ? '<span class="tag" style="background:#fee2e2;color:#991b1b">运行时强制</span>':''}
       <span class="why">${esc(it.v.reason)}</span></div>`;
   }
@@ -420,7 +710,7 @@ function renderItem(it, b) {
     let h = `<div class="verdict ${ok?'ok':'no'}">${ok?'✓ 通过':'✕ 否决'}
       ${rv.forced_by_runtime?'<span class="tag" style="background:#fee2e2;color:#991b1b">运行时强制否决</span>':''}
       <span class="why">${esc(rv.reason)}</span></div>`;
-    if (rv.final_answer) h += `<div style="margin-top:9px;white-space:pre-wrap;font-size:13.5px">${esc(rv.final_answer)}</div>`;
+    if (rv.final_answer) h += `<div class="md" style="margin-top:10px">${mdToHtml(rv.final_answer)}</div>`;
     return h;
   }
   return '';
@@ -453,7 +743,7 @@ function renderChat() {
   if (!store.chat.length) {
     box.innerHTML = `<div class="empty">
       用自然语言说你想对数据库做什么。<br>
-      六个智能体会协作完成：规划 → 生成 SQL → 验证 → 执行，失败就自动修正。<br>
+      六个智能体会协作完成：规划 → 生成 SQL → 校验 → 执行，失败就自动修正。<br>
       删除操作会停下来等你确认；任何 DDL 一律拒绝。
     </div>`;
     return;
@@ -462,15 +752,33 @@ function renderChat() {
     if (it.kind === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
     if (it.kind === 'sys') {
       const extra = it.done ? `<div style="margin-top:8px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <span class="opt" data-open="flow">数据流转</span>
+        <span class="opt" data-open="usage">消耗清单</span>
         <span class="opt" data-open="audit">SQL 审计</span>
-        <span class="opt" data-open="route">协作链路</span>
-        <span class="opt" data-open="schema">表结构</span></div>` : '';
+        <span class="opt" data-open="seq">时序图</span></div>` : '';
       return `<div class="msg sys"><div class="bubble" style="${it.bad?'background:#fee2e2;color:#991b1b':''}">${esc(it.text)}${extra}</div></div>`;
+    }
+    if (it.kind === 'stalled') {
+      const list = (it.attempts || []).filter((a) => !a.ok);
+      return `<div class="msg agent bad"><div class="avatar" style="background:#dc2626">停</div>
+        <div class="bubble"><div class="who" style="color:#dc2626">系统 · 已停止重试</div>
+          <div>${esc(it.reason)}</div>
+          ${list.length ? `<details data-fold="stall-${list.length}" ${foldOpen('stall-'+list.length, true) ? 'open' : ''}>
+            <summary style="cursor:pointer;font-size:12px;color:#6b7280">已经试过并失败的 ${list.length} 版 SQL</summary>
+            ${list.map((a) => `<div class="claim"><div style="font-size:12px"><b>第 ${(a.round ?? 0)+1} 轮</b> ${esc(a.why || '')}</div>
+              <pre class="sql">${esc(a.sql || '')}</pre></div>`).join('')}
+          </details>` : ''}
+          <div style="font-size:12px;color:#6b7280;margin-top:6px">
+            修正没有产生新内容，继续重试只会浪费轮次，因此主动停下并把过程摊开给你看。</div>
+        </div></div>`;
+    }
+    if (it.kind === 'turn') {
+      return `<div class="turnsep"><span>新的一轮 · 已带上上面的上下文</span></div>`;
     }
     if (it.kind === 'route') {
       return `<div class="routebar ${it.overridden?'forced':''}"><span>
         ${esc(A(it.from).cn)} → ${esc(A(it.to).cn)}｜${esc(it.reason)}
-        ${it.overridden ? `　⚠ 护栏改了模型的建议（模型想给 ${esc(A(it.modelWanted).cn)}）` : ''}</span></div>`;
+        ${it.overridden ? `　· 护栏改道（模型原本想给 ${esc(A(it.modelWanted).cn)}）` : ''}</span></div>`;
     }
     return renderBubble(it);
   }).join('');
@@ -482,20 +790,40 @@ function render() { renderHeader(); renderChat(); if ($('info-overlay').classLis
 async function send() {
   const box = $('input'), text = box.value.trim();
   if (!text) return;
-  if (store.finished) newSession();
+  if (store.awaiting) { push({ kind:'sys', bad:true, text:'有一条操作还在等你确认，先点确认或取消。' }); return; }
+  // 上一轮结束 → **在同一个会话里开下一轮**，不清空上面的对话
+  if (store.finished && store.conversationId) beginTurn();
   box.value = ''; box.style.height = 'auto';
   push({ kind:'user', text });
   const btn = $('btn-send'); btn.disabled = true;
   try {
     const r = await fetch('/api/runs', { method:'POST', headers:{'Content-Type':'application/json'},
-                                         body: JSON.stringify({ question: text }) });
+      body: JSON.stringify({ question: text, conversation_id: store.conversationId }) });
     const created = await r.json();
     store.runId = created.global_task_id;
-    store.runInfo = { question: text, status:'created', version:0, round:0 };
+    store.conversationId = created.conversation_id;
+    store.runInfo = { question: text, status:'created', version:0, round:0,
+                      turn: created.turn, conversation_id: created.conversation_id };
     renderHeader(); loadSessions(); openStream(store.runId);
     await fetch(`/api/runs/${store.runId}/start`, { method:'POST' });
   } catch (e) { push({ kind:'sys', bad:true, text:`启动失败：${e}` }); }
   finally { btn.disabled = false; }
+}
+
+/** 上一轮已结束，在同一会话里开启下一轮：保留对话，只重置「本轮」的状态 */
+function beginTurn() {
+  if (store.es) { store.es.close(); store.es = null; }
+  store.blocks = []; store.events = []; store.tasks = []; store.audit = [];
+  store.awaiting = null; store.finished = false; store.curBlock = {};
+  resetUsage();
+  store.chat.push({ kind:'turn' });
+}
+
+/** 本轮消耗清零（顶栏那个数字是「本轮」，全部累计在消耗清单面板里） */
+function resetUsage() {
+  store.usage = { calls:0, prompt_tokens:0, completion_tokens:0, total_tokens:0,
+                  cached_tokens:0, duration_ms:0, failed:0 };
+  store.usageDetail = null;
 }
 
 async function decide(approve, by='用户') {
@@ -510,8 +838,9 @@ function openStream(runId) {
   if (store.es) store.es.close();
   const es = new EventSource(`/api/runs/${runId}/stream`);
   store.es = es;
-  ['run_created','node_start','node_end','plan','sql','check','verdict','handoff',
-   'await_confirm','confirmed','result','consistency','review','done','error'].forEach((t) => {
+  ['run_created','node_start','node_end','plan','memory','llm_call','sql','check','verdict',
+   'handoff','await_confirm','confirmed','result','consistency','review','stalled','give_up',
+   'done','error'].forEach((t) => {
     es.addEventListener(t, (ev) => {
       try { handleEvent(JSON.parse(ev.data)); } catch (e) { console.error(e); }
       if (t === 'done') { store.finished = true; es.close(); store.es = null; loadSessions(); }
@@ -524,17 +853,37 @@ function newSession() {
   if (store.es) { store.es.close(); store.es = null; }
   store.chat = []; store.blocks = []; store.folds = []; store.events = []; store.tasks = [];
   store.audit = []; store.awaiting = null; store.finished = false;
-  store.runId = null; store.runInfo = {}; store.schema = null;
+  store.runId = null; store.runInfo = {}; store.conversationId = null;
+  store.curBlock = {}; store.blockSeq = 0;
+  resetUsage(); store.usageAll = null;
   render();
 }
-async function openSession(runId) {
-  newSession(); store.runId = runId;
-  const d = await (await fetch(`/api/runs/${runId}`)).json();
-  store.runInfo = { ...d.run }; store.tasks = d.tasks; store.audit = d.audit;
-  store.chat.push({ kind:'user', text: d.run.question });
-  (d.events || []).forEach(handleEvent);
+
+/** 打开一个会话：**把所有轮次按顺序回放**，而不是只显示最后一轮 */
+async function openSession(convId) {
+  newSession(); store.conversationId = convId;
+  let d;
+  try { d = await (await fetch(`/api/conversations/${convId}`)).json(); }
+  catch (e) { return; }
+  const turns = d.turns || [];
+  if (!turns.length) return;
+  turns.forEach((t, idx) => {
+    if (idx > 0) store.chat.push({ kind:'turn' });
+    store.runId = t.global_task_id;       // 让气泡按 run / 节点调用隔离
+    store.curBlock = {};                  // 回放上一轮时不能把气泡接到本轮的块上
+    resetUsage();                         // 同理：消耗也按轮算
+    store.audit = t.audit || [];
+    store.finished = false;
+    store.chat.push({ kind:'user', text: t.question });
+    (t.events || []).forEach(handleEvent);
+  });
+  const last = turns[turns.length - 1];
+  store.runId = last.global_task_id;
+  store.runInfo = { question: last.question, status: last.status, turn: last.turn,
+                    round: 0, conversation_id: convId };
+  store.audit = last.audit || [];
   render(); loadSessions();
-  if (!['done','failed'].includes(store.runInfo.status)) openStream(runId);
+  if (!['done','failed'].includes(last.status)) { store.finished = false; openStream(last.global_task_id); }
 }
 async function refreshDetail() {
   if (!store.runId) return;
@@ -545,22 +894,112 @@ async function refreshDetail() {
 
 /* ---------------- 覆盖层 ---------------- */
 const RISK_ORDER = { '禁止':0, '需确认':1, '写入':2, '只读':3 };
+function useCard(k, v, d, cls) {
+  return `<div class="use-card ${cls}"><div class="k">${esc(k)}</div>
+    <div class="v">${v}</div><div class="d">${esc(d)}</div></div>`;
+}
 function renderInfo() {
-  if (store.infoMode === 'schema') {
-    $('info-title').textContent = '可访问的表结构';
-    $('info-hint').textContent = '这是受限角色实际能看到的表 —— 白名单也来自这里';
-    const s = store.schema;
-    if (!s) { $('info-body').innerHTML = '<div class="empty">加载中…</div>'; return; }
-    const tables = s.tables || {};
-    if (!Object.keys(tables).length) { $('info-body').innerHTML = '<div class="empty">没有可访问的表</div>'; return; }
-    $('info-body').innerHTML = Object.values(tables).map((t) => `
-      <div class="tbl"><div class="hd">${esc(t.name)}</div>
-      <table class="grid"><thead><tr><th>字段</th><th>类型</th><th>约束</th></tr></thead><tbody>
-      ${t.columns.map((c)=>`<tr><td>${esc(c.name)}${(t.pk||[]).includes(c.name)?' <b>PK</b>':''}</td>
-        <td class="mono">${esc(c.type)}</td><td>${c.null?'':'NOT NULL'}</td></tr>`).join('')}
-      </tbody></table>
-      ${(t.fk||[]).map((f)=>`<div style="font-size:11.5px;color:#6b7280;margin-top:4px">外键 ${esc(f.column)} → ${esc(f.ref_table)}.${esc(f.ref_column)}（ON DELETE ${esc(f.on_delete)}）</div>`).join('')}
-      </div>`).join('');
+  if (store.infoMode === 'usage') {
+    $('info-title').textContent = '大模型消耗清单';
+    const d = store.usageDetail;
+    if (!d) { $('info-body').innerHTML = '<div class="empty">加载中…</div>'; return; }
+    // 「离线模式」的提示只在**确实没有调用记录**时才给。
+    // 现在跑在 mock 上、但这一轮是之前用真实模型跑出来的 —— 那 6 条明细照样要显示，
+    // 不能因为当前模式是 mock 就把历史账目藏起来说"没发请求"。
+    if (!d.llm_enabled && !(d.calls || []).length) {
+      $('info-hint').textContent = '离线 mock 模式';
+      $('info-body').innerHTML = `<div class="empty">当前是 <b>LLM_MODE=${esc(d.llm_mode)}</b>：<br>
+        这一轮没有调用大模型，所以没有消耗 —— 不是"用了 0 token"，是<b>根本没发请求</b>。<br>
+        换成 <code>LLM_MODE=deepseek</code> 再跑一次，这里就会出现每次调用的 token 明细。</div>`;
+      return;
+    }
+    $('info-hint').textContent = `每次调用的 token 用量（取自模型响应，不估算）· 模型 ${esc(d.model || '—')}`
+      + ' · 存在 agent_sql.llm_call';
+    const t = d.total || {};
+    const rate = (t.prompt_tokens || 0) > 0
+      ? Math.round((t.cached_tokens || 0) / t.prompt_tokens * 100) : 0;
+    let h = `<div class="use-cards">
+      ${useCard('调用次数', fmtNum(t.calls || 0), (t.failed ? `${t.failed} 次失败也占了输入 token` : '全部成功'), 'c1')}
+      ${useCard('输入 token', fmtNum(t.prompt_tokens || 0), `其中缓存命中 ${fmtNum(t.cached_tokens || 0)}（${rate}%）`, 'c2')}
+      ${useCard('输出 token', fmtNum(t.completion_tokens || 0), '模型生成的部分', 'c3')}
+      ${useCard('合计 token', fmtNum(t.total_tokens || 0), `累计耗时 ${((t.duration_ms || 0)/1000).toFixed(1)}s`, 'c4')}
+    </div>`;
+
+    const byRole = d.by_role || [];
+    if (byRole.length) {
+      h += `<div class="use-sec">按智能体</div>
+        <table class="grid"><thead><tr><th>智能体</th><th>调用</th><th>输入</th><th>输出</th>
+        <th>合计</th><th>占比</th><th>耗时</th></tr></thead><tbody>`;
+      const grand = t.total_tokens || 1;
+      byRole.forEach((r) => {
+        const w = Math.round((r.total_tokens || 0) / grand * 100);
+        h += `<tr><td><b>${esc(A(r.role).cn)}</b> <span class="mono" style="color:#9ca3af">${esc(r.role)}</span></td>
+          <td>${fmtNum(r.calls)}</td><td>${fmtNum(r.prompt_tokens)}</td>
+          <td>${fmtNum(r.completion_tokens)}</td><td><b>${fmtNum(r.total_tokens)}</b></td>
+          <td><div class="bar-mini"><i style="width:${w}%"></i><span>${w}%</span></div></td>
+          <td>${((r.duration_ms || 0)/1000).toFixed(1)}s</td></tr>`;
+      });
+      h += `</tbody></table>`;
+    }
+
+    const byStage = d.by_stage || [];
+    if (byStage.length) {
+      h += `<div class="use-sec">按步骤（同一个智能体内部也分开看）</div>
+        <table class="grid"><thead><tr><th>智能体</th><th>这一步在干什么</th><th>调用</th>
+        <th>合计 token</th></tr></thead><tbody>
+        ${byStage.map((s) => `<tr><td>${esc(A(s.role).cn)}</td><td>${esc(s.stage || '—')}</td>
+          <td>${fmtNum(s.calls)}</td><td><b>${fmtNum(s.total_tokens)}</b></td></tr>`).join('')}
+        </tbody></table>`;
+    }
+
+    const calls = d.calls || [];
+    if (!calls.length) {
+      h += `<div class="empty">这一轮没有消耗记录。<br>
+        要么它没有调用过大模型，要么这次运行发生在「消耗统计」上线之前
+        —— 老记录补不回来，重新跑一轮就有明细了。</div>`;
+    } else {
+      h += `<div class="use-sec">调用明细（${calls.length} 次，按发生顺序）</div>
+        <table class="grid"><thead><tr><th>#</th><th>智能体</th><th>在干什么</th><th>轮/子任务</th>
+        <th>模型</th><th>输入</th><th>输出</th><th>合计</th><th>缓存命中</th><th>耗时</th></tr></thead><tbody>`;
+      calls.forEach((c) => {
+        const okMark = c.ok === false ? ' <span style="color:#dc2626">✕</span>' : '';
+        h += `<tr>
+          <td class="mono">${esc(c.call_id)}${okMark}</td>
+          <td>${esc(A(c.role).cn)}</td>
+          <td>${esc(c.stage || '—')}${c.attempt > 1 ? `<span class="tag">第 ${c.attempt} 次重试</span>` : ''}
+            ${c.error ? `<div style="color:#dc2626;font-size:11px">${esc(clip(c.error, 90))}</div>` : ''}</td>
+          <td>第 ${(c.round ?? 0)+1} 轮 · c${esc(c.cursor ?? 0)}</td>
+          <td class="mono" style="font-size:11px">${esc(c.model || '—')}</td>
+          <td>${fmtNum(c.prompt_tokens)}</td><td>${fmtNum(c.completion_tokens)}</td>
+          <td><b>${fmtNum(c.total_tokens)}</b></td>
+          <td>${fmtNum(c.cached_tokens)}</td>
+          <td>${c.duration_ms != null ? (c.duration_ms/1000).toFixed(1)+'s' : '—'}</td>
+        </tr>`;
+      });
+      h += `</tbody></table>`;
+    }
+
+    const all = store.usageAll;
+    if (all) {
+      const at = all.total || {};
+      h += `<div class="use-sec">全部会话累计</div>
+        <div class="fi fi-dim" style="padding:0 2px">
+          ${fmtNum(at.calls || 0)} 次调用 · 输入 ${fmtNum(at.prompt_tokens || 0)} ·
+          输出 ${fmtNum(at.completion_tokens || 0)} · 合计 <b>${fmtNum(at.total_tokens || 0)}</b> token
+        </div>`;
+      const convs = all.by_conversation || [];
+      if (convs.length) {
+        h += `<table class="grid"><thead><tr><th>会话</th><th>轮次</th><th>调用</th>
+          <th>输入</th><th>输出</th><th>合计 token</th><th>最近</th></tr></thead><tbody>
+          ${convs.map((c) => `<tr><td>${esc(clip(c.question, 30))}</td>
+            <td>${esc(c.runs)}</td><td>${fmtNum(c.calls)}</td>
+            <td>${fmtNum(c.prompt_tokens)}</td><td>${fmtNum(c.completion_tokens)}</td>
+            <td><b>${fmtNum(c.total_tokens)}</b></td>
+            <td>${esc(shortTime(c.last_at))}</td></tr>`).join('')}
+        </tbody></table>`;
+      }
+    }
+    $('info-body').innerHTML = h;
     return;
   }
   if (store.infoMode === 'audit') {
@@ -577,27 +1016,478 @@ function renderInfo() {
       </tr>`).join('')}</tbody></table>`;
     return;
   }
-  // route：协作链路（动态路由）
-  $('info-title').textContent = '协作链路';
+  if (store.infoMode === 'flow') {
+    $('info-title').textContent = '数据流转链路';
+    $('info-hint').textContent =
+      '智能体之间每一次交接、流转的内容，以及护栏有没有改掉模型的建议（存 agent_event 表，可逐条回放）';
+    if (!store.events.length) {
+      $('info-body').innerHTML = '<div class="empty">还没有流转记录</div>';
+      return;
+    }
+    $('info-body').innerHTML = renderFlow();
+    return;
+  }
+  // seq：协作时序图
+  $('info-title').textContent = '协作时序图';
   $('info-hint').textContent = '链路不固定 —— 每个智能体自己建议下一步，护栏决定能不能去';
-  const hs = store.events.filter((e) => e.event_type === 'handoff');
-  if (!hs.length) { $('info-body').innerHTML = '<div class="empty">还没有路由记录</div>'; return; }
-  $('info-body').innerHTML = hs.map((e, i) => {
-    const p = e.payload || {};
-    return `<div class="chunk" style="border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin-bottom:7px;background:${p.overridden?'#fffbeb':'#fbfdff'}">
-      <div style="font-size:11.5px;color:#6b7280">第 ${i+1} 步 · r${e.round}</div>
-      <div style="font-weight:700">${esc(A(p.from).cn)} → ${esc(A(p.to).cn)}</div>
-      <div style="font-size:12.5px;color:#374151">${esc(p.reason)}</div>
-      ${p.overridden?`<div style="font-size:11.5px;color:#92400e">⚠ 模型建议去 ${esc(A(p.model_wanted).cn)}，被护栏拦住</div>`:''}
-    </div>`;
-  }).join('');
+  $('info-body').innerHTML = `<div class="legend">
+      <span><i></i>交接（谁把什么交给谁）</span>
+      <span><i class="grn"></i>通过 / 确认</span>
+      <span><i class="red"></i>否决 / 拒绝 / 取消</span>
+      <span><i class="amb"></i>暂停等人工确认</span>
+      <span>▢ 方框＝该智能体的产出</span>
+    </div><div id="seq-canvas"></div>`;
+  renderSequence();
 }
+
+/* ---------------- 数据流转链路 ---------------- */
+/* 把 agent_event 按「谁交给谁」切成一段一段：每段 = 一个智能体的产出 + 它的交接决定。
+   `handoff` 事件里的 model_wanted / overridden 就是「护栏改了模型的建议」的原始证据。 */
+function buildFlow() {
+  const steps = [];
+  let cur = null;
+  /* 事件可能**先于 `node_start` 到达** —— 比如 interrupt 触发的 `await_confirm`。
+     这时也要能自己起一段，否则「暂停等确认」和「用户点了确认还是取消」会被整段丢掉，
+     而那恰恰是这个视图最该看见的东西。 */
+  const ensure = (role, r) => {
+    if (!cur) cur = { from: role, round: r, items: [], raw: [] };
+    return cur;
+  };
+  /* items 是给人看的摘要；raw 是**原样的原始事件** —— 两个都留。
+     摘要会骗人（它是我挑的字段），原始结构不会。 */
+  const put = (item, e, role, r) => {
+    const c = ensure(role, r);
+    if (item) c.items.push(item);
+    c.raw.push(e);
+  };
+
+  for (const e of store.events) {
+    const p = e.payload || {}, r = e.round ?? 0, role = e.role;
+    switch (e.event_type) {
+      case 'run_created':
+        steps.push({ kind:'start', question:p.question || '', tables:p.tables || [], raw:[e] });
+        break;
+      case 'node_start':
+        if (!cur || cur.from !== role || cur.round !== r) cur = { from:role, round:r, items:[], raw:[] };
+        break;
+      case 'node_end':
+        if (cur) cur.summary = p.summary || '';
+        break;
+      case 'handoff':
+        steps.push({ kind:'hop', from:p.from, to:p.to, reason:p.reason || '',
+                     modelWanted:p.model_wanted || null, overridden:!!p.overridden, round:r,
+                     items: cur ? cur.items : [], summary: cur ? cur.summary : '',
+                     raw: (cur ? cur.raw : []).concat([e]) });
+        cur = null;
+        break;
+      case 'plan':        put({ t:'plan', ...p }, e, role, r); break;
+      case 'memory':      put({ t:'memory', ...p }, e, role, r); break;
+      case 'tables':      put({ t:'tables', ...p }, e, role, r); break;
+      case 'sql':         put({ t:'sql', ...p }, e, role, r); break;
+      case 'check':       put({ t:'check', ...p }, e, role, r); break;
+      case 'verdict':     put({ t:'verdict', ...p }, e, role, r); break;
+      case 'result':      put({ t:'result', ...p }, e, role, r); break;
+      case 'review':      put({ t:'review', ...p }, e, role, r); break;
+      case 'consistency': put({ t:'consistency', ...p }, e, role, r); break;
+      case 'await_confirm': put({ t:'await_confirm', ...p }, e, role, r); break;
+      // 用户的选择记在发起确认的那个智能体名下（事件 role 是 system）
+      case 'confirmed':   put({ t:'confirmed', ...p }, e, cur ? cur.from : 'executor', r); break;
+      // 节点**真正 return 出去的状态增量** —— 这才是「传过去的内容」
+      case 'state_delta': put({ t:'delta', ...p }, e, role, r); break;
+      case 'stalled':     steps.push({ kind:'stalled', reason:p.reason || '', attempts:p.attempts || [], raw:[e] }); break;
+      case 'give_up':     steps.push({ kind:'giveup', reason:p.reason || '', raw:[e] }); break;
+      case 'error':       steps.push({ kind:'error', message:p.message || '', raw:[e] }); break;
+      case 'done':        steps.push({ kind:'end', status:p.status, reason:p.reason || '', round:r, raw:[e] }); break;
+    }
+  }
+  return steps;
+}
+
+const flowName = (k) => k === 'done' ? '结束'
+  : (AGENT[k] || {}).cn || k || '—';
+const flowFace = (k) => {
+  if (k === 'done') return `<span class="face" style="background:#94a3b8">终</span>`;
+  const a = AGENT[k] || {};
+  return `<span class="face" style="background:${a.color || '#94a3b8'}">${esc(a.face || '·')}</span>`;
+};
+
+/* 每种事件「流转了什么内容」—— 这是这个视图的核心：不只看去了哪，还看带了什么过去 */
+function flowItem(it) {
+  if (it.t === 'plan') {
+    const isReplan = it.phase && it.phase !== 'initial';
+    const REPLAN_CN = { continue:'剩余计划不变，继续做', revise:'调整后续任务', finish:'信息已够，收尾' };
+    let h = `<div class="fi"><div class="fi-k">产出 · <b>${isReplan ? '🔁 规划器复查' : '任务拆解'}</b>`;
+    if (isReplan) h += ` <span class="fi-dim">${esc(REPLAN_CN[it.phase] || it.phase)}</span>`;
+    h += `</div>`;
+    if (isReplan && it.review_note) h += `<div class="fi-line">复查结论：${esc(it.review_note)}</div>`;
+    if (it.understanding && !isReplan) h += `<div class="fi-line">理解：${esc(it.understanding)}</div>`;
+    const done = it.cursor ?? 0;
+    (it.intents || []).forEach((x, i) => {
+      h += `<div class="fi-line">${isReplan ? (i < done ? '✓ ' : '· ') : '· '}<b>${esc(x.sub_task_id)}</b> [${esc(x.kind)}] ${esc(x.intent)}`;
+      if ((x.depends_on || []).length) h += ` <span class="fi-dim">依赖 ${esc(x.depends_on.join('、'))}</span>`;
+      if (x.acceptance) h += ` <span class="fi-dim">· 完成标准：${esc(x.acceptance)}</span>`;
+      h += `</div>`;
+    });
+    if (it.refusal) h += `<div class="fi-bad">🚫 拒绝执行：${esc(it.refusal)}</div>`;
+    if ((it.dropped || []).length)
+      h += `<div class="fi-line" style="color:#92400e">复查后判定不必再做：${esc(it.dropped.join('、'))}</div>`;
+    return h + `</div>`;
+  }
+  if (it.t === 'memory') {
+    const ent = it.entities || {}, vals = ent.values || [];
+    let h = `<div class="fi"><div class="fi-k">产出 · <b>🧠 共享记忆</b>
+        <span class="delta-tag">agent_memory</span>
+        <span class="fi-dim">只有执行器真跑过的才算事实</span></div>
+      <div class="fi-line">${esc(it.claim || '')}</div>
+      <div class="fi-line fi-dim">来源 sql_id=${esc(it.sql_id ?? '—')} · ${esc(it.rowcount ?? '?')} 行
+        ${it.verified ? '· 已核对' : ''}</div>`;
+    if (ent.key && vals.length)
+      h += `<div class="fi-line fi-dim">可复用实体：${esc(ent.table)}.${esc(ent.key)} = ${esc(vals.slice(0, 20).join('、'))}${vals.length > 20 ? ` …（共 ${vals.length} 个）` : ''}</div>`;
+    return h + `</div>`;
+  }
+  if (it.t === 'tables') {
+    return `<div class="fi"><div class="fi-k">产出 · <b>第一层选表</b>（只看表简述与关系）</div>
+      <div class="fi-line">选中：<b>${esc((it.selected || []).join('、') || '—')}</b></div>
+      ${it.reason ? `<div class="fi-line fi-dim">依据：${esc(it.reason)}</div>` : ''}
+      <div class="fi-line fi-dim">候选池：${esc((it.candidates || []).join('、'))}</div></div>`;
+  }
+  if (it.t === 'sql') {
+    const d = it.draft || {}, v = it.verdict || {};
+    return `<div class="fi"><div class="fi-k">产出 · <b>SQL</b>
+        <span class="risk r-${esc(v.level)}">${esc(v.level)}</span>
+        <span class="fi-dim">${esc(v.action || '')}</span></div>
+      ${it.what_changed ? `<div class="fi-line">修正说明：${esc(it.what_changed)}</div>` : ''}
+      <pre class="fi-pre">${esc(d.sql || '')}</pre>
+      ${d.note ? `<div class="fi-line fi-dim">${esc(d.note)}</div>` : ''}
+      ${(v.notes || []).length ? `<div class="fi-line" style="color:#b45309">⚠ ${esc(v.notes.join('；'))}</div>` : ''}
+      ${(v.reasons || []).length ? `<div class="fi-bad">🚫 ${esc(v.reasons.join('；'))}</div>` : ''}</div>`;
+  }
+  if (it.t === 'delta') {
+    const keys = it.keys || Object.keys(it.delta || {});
+    return `<div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">${keys.length} 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">${esc(keys.join(' · '))}</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div>`;
+  }
+  if (it.t === 'check') {
+    const ok = it.result === 'pass';
+    return `<div class="fi"><div class="fi-line">${ok ? '✓' : '✕'} <b>${esc(it.item)}</b>
+      <span class="fi-dim">${esc(it.check_id)}</span>
+      ${it.detail ? `<div class="fi-dim" style="padding-left:14px">${esc(it.detail)}</div>` : ''}</div></div>`;
+  }
+  if (it.t === 'verdict') {
+    return `<div class="fi"><div class="fi-line">校验结论：<b>${it.passed ? '通过' : '不通过'}</b>
+      ${it.forced_by_runtime ? '<span class="fi-bad">（硬门禁：运行时没过，模型说通过也不算）</span>' : ''}
+      ${it.reason ? `<div class="fi-dim" style="padding-left:14px">${esc(it.reason)}</div>` : ''}</div></div>`;
+  }
+  if (it.t === 'await_confirm') {
+    return `<div class="fi"><div class="fi-k">产出 · <b>暂停等人工确认</b></div>
+      <div class="fi-line">风险 ${esc(it.risk_level || '')} · 涉及表 ${esc((it.tables || []).join('、'))}
+        · 预估影响 <b>${it.est_rows ?? '未知'}</b> 行</div>
+      ${(it.cascade || []).length ? `<div class="fi-line" style="color:#b45309">⚠ ${esc(it.cascade.join('；'))}</div>` : ''}</div>`;
+  }
+  if (it.t === 'confirmed') {
+    return `<div class="fi"><div class="fi-line">${it.approve ? '✓ 用户确认执行' : '✕ 用户取消执行'}
+      <span class="fi-dim">（${esc(it.by || '')}）</span></div></div>`;
+  }
+  if (it.t === 'result') {
+    const ok = it.ok;
+    return `<div class="fi"><div class="fi-k">产出 · <b>执行结果</b></div>
+      <div class="fi-line">${ok ? '✓ 成功' : '✕ 失败'} · 影响/返回 <b>${it.rowcount ?? 0}</b> 行
+        ${it.duration_ms != null ? `<span class="fi-dim">${esc(it.duration_ms)}ms</span>` : ''}</div>
+      ${it.error ? `<div class="fi-bad">${esc(clip(it.error, 300))}</div>` : ''}</div>`;
+  }
+  if (it.t === 'consistency') {
+    return `<div class="fi"><div class="fi-line">运行时一致性校验：<b>${it.passed ? '全部通过' : '存在失败项'}</b></div></div>`;
+  }
+  if (it.t === 'review') {
+    return `<div class="fi"><div class="fi-k">产出 · <b>最终答复</b>
+        <span class="fi-dim">${it.decision === 'approve' ? 'approve' : 'veto'}</span></div>
+      <div class="fi-line" style="white-space:pre-wrap">${esc(it.final_answer || '')}</div>
+      ${it.reason ? `<div class="fi-line fi-dim">${esc(it.reason)}</div>` : ''}</div>`;
+  }
+  return '';
+}
+
+function renderFlow() {
+  const steps = buildFlow();
+  const hops = steps.filter((s) => s.kind === 'hop');
+  const ovr = hops.filter((s) => s.overridden).length;
+  const replans = store.events.filter((e) => e.event_type === 'plan'
+    && e.payload && e.payload.phase && e.payload.phase !== 'initial').length;
+  const mems = store.events.filter((e) => e.event_type === 'memory').length;
+  const rounds = new Set(store.events.map((e) => e.round ?? 0)).size;
+
+  let h = `<div class="flow">
+    <div class="flow-bar">
+      <span>共 <b>${hops.length}</b> 次流转</span>
+      <span>规划器复查 <b style="color:${replans ? '#92400e' : '#166534'}">${replans}</b> 次</span>
+      <span>共享记忆 <b style="color:${mems ? '#0f766e' : '#166534'}">${mems}</b> 条</span>
+      <span>护栏改道 <b>${ovr}</b> 次</span>
+      <span>轮次 <b>${rounds}</b></span>
+      <span>事件 <b>${store.events.length}</b> 条</span>
+      <span class="opt" id="flow-raw-toggle">${store.rawAll ? '收起全部原始结构' : '展开全部原始结构'}</span>
+    </div>
+    <div class="fi fi-dim" style="padding:0 2px">
+      上面是人话摘要（我挑的字段）；每个卡片底部的「真实传递过去的内容」是**原样落库的完整结构** ——
+      包含节点 <code>return</code> 出去的状态增量（<span class="delta-tag">state_delta</span>），
+      那才是下一个智能体真正读到的东西。
+    </div>`;
+
+  steps.forEach((s, i) => {
+    if (s.kind === 'start') {
+      h += `<div class="flow-start">📥 <b>起点</b> · 用户提交问题：${esc(s.question)}
+        <div class="fi-dim" style="margin-top:3px">系统目录中的表：${esc((s.tables || []).join('、'))}</div></div>`;
+      return;
+    }
+    if (s.kind === 'end') {
+      h += `<div class="flow-end">${s.status === 'done' ? '✅ 结束' : '⛔ 结束（' + esc(s.status) + '）'}
+        · 共 ${(s.round ?? 0) + 1} 轮 · ${esc(s.reason || '')}</div>`;
+      return;
+    }
+    if (s.kind === 'stalled' || s.kind === 'giveup' || s.kind === 'error') {
+      const title = { stalled:'⏹ 主动停止重试', giveup:'🏳 修正智能体判断无法修复', error:'❗ 出错' }[s.kind];
+      const body = s.reason || s.message || '';
+      h += `<div class="hop" style="border-color:#fca5a5">
+        <div class="hop-hd" style="background:#fef2f2;color:#991b1b">${title}</div>
+        <div class="hop-bd"><div class="fi-bad">${esc(body)}</div></div></div>`;
+      return;
+    }
+    if (s.kind !== 'hop') return;
+
+    h += `<div class="hop ${s.overridden ? 'ovr' : ''}">
+      <div class="hop-hd">
+        <span class="hop-n">${i}</span>
+        ${flowFace(s.from)}<span>${esc(flowName(s.from))}</span>
+        <span class="arrow">──▶</span>
+        ${flowFace(s.to)}<span><b>${esc(flowName(s.to))}</b></span>
+        <span class="badge ${s.overridden ? 'ovr' : 'ok'}">
+          ${s.overridden ? '护栏改道' : '按模型的建议交接'}</span>
+      </div>
+      <div class="hop-bd">`;
+
+    if (s.overridden) {
+      h += `<div class="ovr-box">
+        模型建议交给 <span class="strike">${esc(flowName(s.modelWanted))}</span>
+        　→　护栏改去 <b>${esc(flowName(s.to))}</b>
+        <div class="fi-dim">理由：${esc(s.reason)}</div></div>`;
+    } else if (s.modelWanted) {
+      h += `<div class="fi fi-dim">模型自己建议交给 ${esc(flowName(s.modelWanted))}，护栏在允许范围内采纳</div>`;
+    } else {
+      h += `<div class="fi fi-dim">模型没有给建议，由护栏定：${esc(s.reason)}</div>`;
+    }
+
+    (s.items || []).forEach((it) => { h += flowItem(it); });
+    if (!(s.items || []).length && s.summary) {
+      h += `<div class="fi fi-dim">${esc(s.summary)}</div>`;
+    }
+
+    // 原样的原始结构 —— 摘要是我挑的字段，这个不是
+    const raw = s.raw || [];
+    if (raw.length) {
+      const key = `raw-${i}`;
+      h += `<details class="raw" data-fold="${esc(key)}" ${foldOpen(key, !!store.rawAll) ? 'open' : ''}>
+        <summary>真实传递过去的内容 · 完整结构（${raw.length} 条原始事件）</summary>
+        ${raw.map((e, k) => `<div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#${esc(e.seq ?? k + 1)}</span>
+            <b>${esc(e.event_type)}</b>
+            <span class="fi-dim">role=${esc(e.role)} · round=${esc(e.round ?? 0)} · version=${esc(e.version ?? 0)}</span>
+            ${e.event_type === 'state_delta' ? '<span class="delta-tag">节点返回值</span>' : ''}
+          </div>
+          <pre class="raw-pre">${esc(JSON.stringify(e.payload, null, 2))}</pre>
+        </div>`).join('')}
+      </details>`;
+    }
+
+    h += `</div></div>`;
+  });
+
+  return h + `</div>`;
+}
+
+/* ---------------- 时序图 ---------------- */
+const SEQ_P = [
+  { key:'user',      cn:'用户' },
+  { key:'planner',   cn:'规划器' },
+  { key:'generator', cn:'SQL生成' },
+  { key:'validator', cn:'SQL校验' },
+  { key:'executor',  cn:'SQL执行' },
+  { key:'fixer',     cn:'SQL修正' },
+  { key:'reviewer',  cn:'汇总审查' },
+];
+const SEQ_IDX = { user:0, planner:1, generator:2, validator:3, executor:4, fixer:5, reviewer:6 };
+const SEQ_HEAD = ['#334155','#4f46e5','#0891b2','#7c3aed','#d97706','#db2777','#e11d48'];
+
+/** 把事件流还原成时序步骤 */
+function buildSequence() {
+  const steps = [];
+  let lastRound = null;
+  for (const e of store.events) {
+    const p = e.payload || {}, r = e.round ?? 0;
+    if (e.event_type === 'run_created') {
+      steps.push({ kind:'band', label: clip(p.question || '开始', 64) });
+      lastRound = 0;
+      steps.push({ kind:'msg', from:0, to:1, tone:'ok', main:'提交问题',
+                   sub:`系统目录 ${(p.tables||[]).length} 张表` });
+      continue;
+    }
+    if (e.event_type === 'node_start' && r !== lastRound) {
+      steps.push({ kind:'band', label:`第 ${r+1} 轮` });
+      lastRound = r;
+    }
+    if (e.event_type === 'plan') {
+      const isReplan = p.phase && p.phase !== 'initial';
+      const REPLAN_CN = { continue:'继续', revise:'改后续任务', finish:'收尾' };
+      steps.push({ kind:'note', who:1, tone: p.refusal ? 'bad' : (isReplan ? 'warn' : ''),
+                   label: p.refusal ? `🚫 拒绝：${clip(p.refusal, 24)}`
+                        : (isReplan ? `🔁 复查：${REPLAN_CN[p.phase] || p.phase} — ${clip(p.review_note, 26)}`
+                                    : `拆出 ${(p.intents||[]).length} 个意图`) });
+    } else if (e.event_type === 'memory') {
+      const ent = p.entities || {};
+      steps.push({ kind:'note', who:4, tone:'ok',
+                   label: `🧠 写入共享记忆 · sql_id=${p.sql_id ?? '—'} · ${p.rowcount ?? '?'} 行`
+                          + ((ent.values || []).length ? ` · 可复用实体 ${ent.table}.${ent.key}` : '') });
+    } else if (e.event_type === 'sql') {
+      const v = p.verdict || {};
+      steps.push({ kind:'note', who: SEQ_IDX[e.role] ?? 2,
+                   tone: v.level === '禁止' ? 'bad' : (v.level === '需确认' ? 'warn' : ''),
+                   label: `${p.stage === 'fixed' ? '修正' : '生成'} SQL · ${v.action || ''} · ${v.level || ''}` });
+    } else if (e.event_type === 'verdict') {
+      steps.push({ kind:'note', who: SEQ_IDX[e.role] ?? 3, tone: p.passed ? 'ok' : 'bad',
+                   label: p.passed ? '校验通过' : '校验不通过' });
+    } else if (e.event_type === 'handoff') {
+      steps.push({ kind:'msg', from: SEQ_IDX[p.from] ?? 1, to: SEQ_IDX[p.to] ?? 1,
+                   main: p.reason || '交接', overridden: !!p.overridden });
+    } else if (e.event_type === 'await_confirm') {
+      steps.push({ kind:'msg', from:4, to:0, tone:'warn',
+                   main:`⏸ 需要确认：预计影响 ${p.est_rows ?? '?'} 行`,
+                   sub: clip(p.sql, 46) });
+    } else if (e.event_type === 'confirmed') {
+      steps.push({ kind:'msg', from:0, to:4, tone: p.approve ? 'ok' : 'veto',
+                   main: p.approve ? '✓ 确认执行' : '✕ 取消执行', sub: p.by || '' });
+    } else if (e.event_type === 'result') {
+      const label = p.kind === 'cancelled' ? '已取消，未做任何改动'
+                  : (p.ok ? `影响 ${p.rowcount} 行 · ${p.duration_ms}ms`
+                          : `失败：${clip(p.error, 24)}`);
+      steps.push({ kind:'note', who:4,
+                   tone: p.kind === 'cancelled' ? '' : (p.ok ? 'ok' : 'bad'), label });
+    } else if (e.event_type === 'review') {
+      steps.push({ kind:'msg', from:6, to:0, tone: p.decision === 'approve' ? 'ok' : 'veto',
+                   main: p.decision === 'approve' ? '✓ 交付结果' : '✕ 否决',
+                   sub: clip(p.reason, 44) });
+    }
+  }
+  return steps;
+}
+
+function renderSequence() {
+  const host = $('seq-canvas');
+  if (!host) return;
+  const steps = buildSequence();
+  if (!steps.length) { host.innerHTML = '<div class="empty">还没有事件，先开始一次任务。</div>'; return; }
+
+  const W = Math.max(1240, ($('info-body').clientWidth || 1240) - 34);
+  const padX = 94;
+  const colW = (W - padX * 2) / (SEQ_P.length - 1);
+  const X = (i) => padX + colW * i;
+  const HEAD_TOP = 16, HEAD_H = 44, GAP = 30;
+  const ROW = { band:46, msg:68, note:50 };
+  let y = HEAD_TOP + HEAD_H + GAP;
+  const laid = steps.map((s) => { const at = y; y += ROW[s.kind] || 56; return { s, y: at }; });
+  const H = y + 28;
+
+  const TONE = {
+    norm: ['#64748b','ah',''], ok: ['#16a34a','ah-green',''],
+    veto: ['#dc2626','ah-red',' stroke-dasharray="8 5"'],
+    warn: ['#d97706','ah-amber',' stroke-dasharray="8 5"'],
+  };
+  const out = [];
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="Microsoft YaHei, Segoe UI, sans-serif">`);
+  out.push(`<defs>
+    <marker id="ah" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+    <marker id="ah-red" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <marker id="ah-green" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
+    <marker id="ah-amber" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+  </defs>`);
+
+  SEQ_P.forEach((p, i) => {
+    out.push(`<rect x="${X(i)-50}" y="${HEAD_TOP}" width="100" height="${HEAD_H}" rx="9" fill="${SEQ_HEAD[i]}"/>`);
+    out.push(`<text x="${X(i)}" y="${HEAD_TOP+19}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${esc(p.cn)}</text>`);
+    out.push(`<text x="${X(i)}" y="${HEAD_TOP+34}" text-anchor="middle" font-size="9.5" fill="#fff" opacity="0.75" font-family="Consolas, monospace">${esc(p.key)}</text>`);
+    out.push(`<line x1="${X(i)}" y1="${HEAD_TOP+HEAD_H}" x2="${X(i)}" y2="${H-16}" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="6 6"/>`);
+  });
+
+  laid.forEach(({ s, y }) => {
+    if (s.kind === 'band') {
+      out.push(`<rect x="6" y="${y}" width="${W-12}" height="26" rx="6" fill="#eef2f7"/>`);
+      out.push(`<text x="${W/2}" y="${y+18}" text-anchor="middle" font-size="12" font-weight="700" fill="#64748b">${esc(clip(s.label, 72))}</text>`);
+      return;
+    }
+    if (s.kind === 'note') {
+      const bw = 258, toRight = s.who < SEQ_P.length - 1;
+      const bx = toRight ? X(s.who) + 12 : X(s.who) - 12 - bw;
+      const pal = s.tone === 'bad'  ? ['#fef2f2','#fca5a5','#991b1b']
+                : s.tone === 'ok'   ? ['#f0fdf4','#86efac','#166534']
+                : s.tone === 'warn' ? ['#fffbeb','#fcd34d','#92400e']
+                : ['#f8fafc','#e2e8f0','#475569'];
+      out.push(`<rect x="${bx}" y="${y-8}" width="${bw}" height="30" rx="6" fill="${pal[0]}" stroke="${pal[1]}"/>`);
+      out.push(`<text x="${toRight ? bx+10 : bx+bw-10}" y="${y+12}" text-anchor="${toRight ? 'start' : 'end'}" font-size="12" fill="${pal[2]}">${esc(clip(s.label, 30))}</text>`);
+      return;
+    }
+    const x1 = X(s.from), x2 = X(s.to);
+    const tone = s.tone || (x2 < x1 ? 'veto' : 'norm');
+    const [stroke, marker, dash] = TONE[tone] || TONE.norm;
+    const dir = x2 >= x1 ? 1 : -1;
+    out.push(`<line x1="${x1}" y1="${y}" x2="${x2 - dir*7}" y2="${y}" stroke="${stroke}" stroke-width="2" marker-end="url(#${marker})"${dash}/>`);
+    const cx = (x1 + x2) / 2, main = clip(s.main, 42);
+    const mw = main.length * 7.6 + 16;
+    out.push(`<rect x="${cx-mw/2}" y="${y-21}" width="${mw}" height="19" rx="4" fill="#fff" fill-opacity="0.95"/>`);
+    out.push(`<text x="${cx}" y="${y-7}" text-anchor="middle" font-size="12.5" font-weight="600" fill="${stroke}">${esc(main)}</text>`);
+    if (s.sub) {
+      const sub = clip(s.sub, 48), sw = sub.length * 6.6 + 12;
+      out.push(`<rect x="${cx-sw/2}" y="${y+6}" width="${sw}" height="16" rx="4" fill="#fff" fill-opacity="0.95"/>`);
+      out.push(`<text x="${cx}" y="${y+18}" text-anchor="middle" font-size="10.5" fill="#94a3b8">${esc(sub)}</text>`);
+    }
+    if (s.overridden) {
+      out.push(`<text x="${cx}" y="${y+36}" text-anchor="middle" font-size="10.5" fill="#92400e">⚠ 护栏改了模型的建议</text>`);
+    }
+  });
+  out.push('</svg>');
+  host.innerHTML = out.join('');
+}
+
+function exportSequence() {
+  const host = $('seq-canvas');
+  const svg = host && host.querySelector('svg');
+  if (!svg) { alert('还没有时序图可导出'); return; }
+  const clone = svg.cloneNode(true);
+  const vb = svg.getAttribute('viewBox').split(' ');
+  clone.setAttribute('width', vb[2]);
+  clone.setAttribute('height', vb[3]);
+  const blob = new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n` + clone.outerHTML],
+                        { type:'image/svg+xml;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '协作时序图.svg';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 async function openInfo(mode) {
   store.infoMode = mode;
   $('info-overlay').classList.add('open');
-  if (mode === 'schema' && !store.schema) {
-    renderInfo();
-    store.schema = await (await fetch('/api/schema')).json();
+  $('info-export').style.display = (mode === 'seq') ? '' : 'none';
+  if (mode === 'usage') {
+    renderInfo();                                   // 先渲染「加载中」
+    if (!store.usageAll) {
+      try { store.usageAll = await (await fetch('/api/usage')).json(); } catch (e) {}
+    }
+    if (!store.usageDetail && store.runId) {
+      try {
+        store.usageDetail = await (await fetch(`/api/runs/${store.runId}/usage`)).json();
+      } catch (e) {}
+    }
   }
   renderInfo();
 }
@@ -610,9 +1500,18 @@ $('input').addEventListener('input', (ev) => {
   ev.target.style.height = 'auto'; ev.target.style.height = Math.min(150, ev.target.scrollHeight)+'px';
 });
 $('btn-new').onclick = () => { newSession(); $('input').focus(); };
-$('btn-schema').onclick = () => openInfo('schema');
+$('btn-usage').onclick = () => openInfo('usage');
 $('btn-audit').onclick = () => openInfo('audit');
-$('btn-route').onclick = () => openInfo('route');
+$('btn-flow').onclick = () => openInfo('flow');
+$('btn-route').onclick = () => openInfo('seq');
+// 「展开/收起全部原始结构」—— 内容是重新渲染的，所以用事件委托
+$('info-body').addEventListener('click', (ev) => {
+  if (ev.target && ev.target.id === 'flow-raw-toggle') {
+    store.rawAll = !store.rawAll;
+    renderInfo();
+  }
+});
+$('info-export').onclick = exportSequence;
 $('info-close').onclick = closeInfo;
 $('info-overlay').onclick = (ev) => { if (ev.target === $('info-overlay')) closeInfo(); };
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeInfo(); });
