@@ -1,0 +1,4094 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>数据流转链路 · sql-agent</title>
+<style>
+
+  :root { --bg:#f5f7fa; --line:#e3e8ef; --text:#1f2937; --muted:#6b7280;
+          --planner:#4f46e5; --generator:#0891b2; --validator:#7c3aed; --executor:#d97706;
+          --fixer:#db2777; --reviewer:#e11d48; --router:#64748b;
+          --ok:#16a34a; --bad:#dc2626; --warn:#d97706; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); overflow:hidden;
+         font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  .mono { font-family:"Cascadia Mono",Consolas,monospace; font-size:12px; }
+
+  header { height:54px; background:#111827; color:#f9fafb; padding:0 16px;
+           display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:14px; margin:0; font-weight:600; white-space:nowrap; }
+  header .pills { display:flex; gap:7px; overflow:hidden; }
+  .pill { background:#1f2937; border:1px solid #374151; border-radius:999px;
+          padding:2px 10px; font-size:11.5px; color:#d1d5db; white-space:nowrap; }
+  .pill b { color:#fff; }
+  .pill.ok { border-color:#166534; color:#86efac; }
+  .pill.bad { border-color:#991b1b; color:#fca5a5; }
+  .hbtns { margin-left:auto; display:flex; gap:7px; }
+  .hbtn { background:#374151; color:#e5e7eb; border:0; border-radius:6px;
+          padding:6px 12px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .hbtn:hover { background:#4b5563; }
+
+  .layout { display:flex; height:calc(100vh - 54px); }
+  .side { width:212px; flex:0 0 212px; background:#fff; border-right:1px solid var(--line);
+          display:flex; flex-direction:column; }
+  .side h2 { margin:0; padding:12px; font-size:12.5px; color:#374151;
+             border-bottom:1px solid var(--line); display:flex; align-items:center; }
+  .side h2 .plus { margin-left:auto; cursor:pointer; color:#2563eb; font-weight:700; font-size:16px; padding:0 4px; }
+  .side .list { flex:1; overflow:auto; padding:8px; }
+  .sess { padding:8px 9px; border:1px solid var(--line); border-radius:8px; margin-bottom:7px;
+          cursor:pointer; background:#fff; }
+  .sess:hover { border-color:#93c5fd; background:#f8fafc; }
+  .sess.on { border-color:#2563eb; box-shadow:0 0 0 2px #dbeafe inset; }
+  .sess .t { font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sess .m { font-size:10.5px; color:var(--muted); display:flex; gap:5px; margin-top:3px; flex-wrap:wrap; }
+  .sess .imp { font-size:10.5px; font-weight:600; border-radius:4px; padding:0 5px; }
+  .sess .imp.write { background:#fef3c7; color:#92400e; }
+  .sess .imp.read  { background:#dbeafe; color:#1d4ed8; }
+  .sess .imp.wait  { background:#ffedd5; color:#9a3412; }
+  .sess .imp.none  { background:#f3f4f6; color:#6b7280; }
+  .sess .imp.bad   { background:#fee2e2; color:#991b1b; }
+
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .chat-scroll { flex:1; overflow:auto; }
+  .chat { padding:18px 20px 6px; display:flex; flex-direction:column; gap:13px;
+          max-width:1040px; margin:0 auto; }
+
+  .msg { display:flex; gap:9px; align-items:flex-start; }
+  .msg.user { justify-content:flex-end; }
+  .msg.sys { justify-content:center; }
+  .avatar { width:30px; height:30px; flex:0 0 30px; border-radius:9px; color:#fff;
+            display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; margin-top:2px; }
+  .bubble { border-radius:14px 14px 14px 4px; padding:9px 13px; font-size:13.5px;
+            max-width:860px; min-width:0; overflow-wrap:anywhere; }
+  .msg.user .bubble { background:#2563eb; color:#fff; border-radius:14px 14px 4px 14px; }
+  .msg.sys .bubble { background:#eef2f7; color:#64748b; font-size:12.5px; border-radius:999px; padding:5px 14px; }
+  .msg.agent .bubble { background:#fff; border:1px solid var(--line); box-shadow:0 1px 2px rgba(16,24,40,.04); }
+  .msg.agent.bad .bubble { background:#fff7f7; border-color:#fca5a5; }
+  .msg.agent.warn .bubble { background:#fffbeb; border-color:#fcd34d; }
+  .who { font-size:12px; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .who .en { font-size:10px; color:#9ca3af; font-family:"Cascadia Mono",Consolas,monospace; font-weight:400; }
+  .who .tag { font-size:10.5px; font-weight:500; color:var(--muted); background:#f3f4f6; border-radius:999px; padding:1px 8px; }
+
+  .routebar { display:flex; justify-content:center; }
+  .routebar span { font-size:11.5px; color:#64748b; background:#f1f5f9;
+                   border:1px dashed #cbd5e1; border-radius:999px; padding:3px 14px; }
+  .routebar.forced span { border-color:#fcd34d; background:#fffbeb; color:#92400e; }
+
+  .dots span { display:inline-block; width:5px; height:5px; margin-right:3px; border-radius:50%;
+               background:#94a3b8; animation:blink 1.2s infinite; }
+  .dots span:nth-child(2){animation-delay:.2s;} .dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink { 0%,60%,100%{opacity:.25} 30%{opacity:1} }
+
+  pre.sql { margin:6px 0; padding:9px 11px; background:#0b1220; color:#a7f3d0; border-radius:8px;
+            font-size:12.5px; overflow-x:auto; white-space:pre-wrap; word-break:break-word; line-height:1.65; }
+  .risk { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11px; font-weight:700; }
+  .r-只读 { background:#dcfce7; color:#166534; }
+  .r-写入 { background:#dbeafe; color:#1d4ed8; }
+  .r-需确认 { background:#fef3c7; color:#92400e; }
+  .r-禁止 { background:#fee2e2; color:#991b1b; }
+
+  .intent { border-left:3px solid #e5e7eb; padding:4px 9px; margin:4px 0; background:#fafafa;
+            border-radius:0 6px 6px 0; font-size:12.5px; }
+  .intent .id { font-weight:700; color:var(--planner); }
+  .chk { display:flex; gap:6px; font-size:12px; padding:2px 0; border-bottom:1px dashed #eef0f3; }
+  .chk .mark { font-weight:700; width:14px; }
+  .chk.pass .mark { color:var(--ok); } .chk.fail .mark { color:var(--bad); }
+  .chk .d { color:var(--muted); font-size:11px; }
+
+  .verdict { margin-top:7px; padding:7px 10px; border-radius:8px; font-size:13px; font-weight:700; }
+  .verdict.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .verdict.no { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+  .verdict .why { display:block; font-weight:400; font-size:12px; margin-top:4px; }
+
+  table.grid { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+  table.grid th, table.grid td { border:1px solid var(--line); padding:4px 7px; text-align:left; }
+  table.grid th { background:#f8fafc; color:var(--muted); font-weight:600; }
+  .affect { font-size:12.5px; margin-top:5px; }
+  .affect b { color:#b45309; }
+
+  .confirmcard { margin-top:8px; border:2px solid var(--warn); background:#fffbeb;
+                 border-radius:10px; padding:10px 12px; }
+  .confirmcard h4 { margin:0 0 6px; font-size:13px; color:#92400e; }
+  .confirmcard .acts { display:flex; gap:8px; margin-top:9px; }
+  .btn { border:0; border-radius:8px; padding:6px 16px; font-size:13px; font-weight:700; cursor:pointer; }
+  .btn.ok { background:#16a34a; color:#fff; }
+  .btn.ok:hover { background:#15803d; }
+  .btn.cancel { background:#f3f4f6; color:#374151; }
+  .btn.cancel:hover { background:#e5e7eb; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+
+  .composer { border-top:1px solid var(--line); background:#fff; padding:10px 16px 12px; }
+  .composer .samples { max-width:1040px; margin:0 auto 7px; display:flex; gap:7px;
+                       align-items:center; flex-wrap:wrap; font-size:11.5px; color:#9ca3af; }
+  .opt { border:1px solid #c7d2fe; background:#eef2ff; color:#3730a3; border-radius:8px;
+         padding:3px 11px; font-size:11.5px; cursor:pointer; font-weight:600; }
+  .opt:hover { background:#e0e7ff; }
+  .composer .inner { max-width:1040px; margin:0 auto; display:flex; gap:9px; align-items:flex-end; }
+  textarea { flex:1; resize:none; border:1px solid var(--line); border-radius:10px; padding:9px 12px;
+             font:inherit; font-size:13.5px; max-height:150px; min-height:42px; outline:none; color:var(--text); }
+  textarea:focus { border-color:#93c5fd; box-shadow:0 0 0 3px #dbeafe; }
+  .send { background:#2563eb; color:#fff; border:0; border-radius:10px; padding:11px 20px;
+          font-size:13.5px; font-weight:600; cursor:pointer; flex-shrink:0; }
+  .send:hover { background:#1d4ed8; }
+  .send:disabled { background:#9ca3af; cursor:not-allowed; }
+  .tip { max-width:1040px; margin:5px auto 0; font-size:11px; color:#9ca3af; }
+
+  .overlay { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; z-index:50; padding:26px; }
+  .overlay.open { display:block; }
+  .win { background:#fff; border-radius:12px; height:100%; display:flex; flex-direction:column;
+         overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.35); }
+  .bar { display:flex; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line);
+         background:#f9fafb; flex-wrap:wrap; }
+  .bar b { font-size:14px; } .bar .hint { font-size:12px; color:var(--muted); }
+  .bar .acts { margin-left:auto; }
+  .mini { background:#fff; color:#374151; border:1px solid var(--line); border-radius:6px;
+          padding:4px 11px; font-size:12px; font-weight:600; cursor:pointer; }
+  .mini:hover { background:#f3f4f6; }
+  .win-body { flex:1; overflow:auto; padding:16px; }
+  .empty { color:var(--muted); font-size:12.5px; text-align:center; padding:22px 8px; }
+  /* ---------- 消耗清单 ---------- */
+  .use-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
+  .use-card { border:1px solid var(--line); border-left-width:4px; border-radius:9px;
+              padding:10px 12px; background:#fbfdff; }
+  .use-card .k { font-size:11.5px; color:var(--muted); }
+  .use-card .v { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums;
+                 margin:2px 0 1px; color:#0f172a; }
+  .use-card .d { font-size:11px; color:#94a3b8; }
+  .use-card.c1 { border-left-color:#4f46e5; } .use-card.c1 .v { color:#4f46e5; }
+  .use-card.c2 { border-left-color:#0891b2; } .use-card.c2 .v { color:#0891b2; }
+  .use-card.c3 { border-left-color:#db2777; } .use-card.c3 .v { color:#db2777; }
+  .use-card.c4 { border-left-color:#0f766e; } .use-card.c4 .v { color:#0f766e; }
+  .use-sec { font-size:12.5px; font-weight:700; color:#334155; margin:16px 0 2px;
+             padding-left:7px; border-left:3px solid #94a3b8; }
+  .bar-mini { display:flex; align-items:center; gap:6px; }
+  .bar-mini i { display:block; height:7px; border-radius:4px; background:#5eead4; min-width:2px; }
+  .bar-mini span { font-size:10.5px; color:#64748b; font-variant-numeric:tabular-nums; }
+
+  /* 时序图 */
+  .legend { display:flex; gap:16px; font-size:12px; color:var(--muted); padding-bottom:10px; flex-wrap:wrap; }
+  .legend i { display:inline-block; width:22px; height:0; border-top:2px solid #64748b;
+              vertical-align:middle; margin-right:5px; }
+  .legend i.red { border-top:2px dashed #dc2626; }
+  .legend i.grn { border-top:2px solid #16a34a; }
+  .legend i.amb { border-top:2px dashed #d97706; }
+  #seq-canvas { display:inline-block; min-width:100%; }
+
+  /* ---------- 数据流转链路 ---------- */
+  .flow { display:flex; flex-direction:column; gap:10px; }
+  .flow-bar { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:#374151;
+              background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:9px 12px; }
+  .flow-bar b { color:#0f172a; font-variant-numeric:tabular-nums; }
+  .flow-start { font-size:12px; color:#334155; background:#eff6ff; border:1px solid #bfdbfe;
+                border-radius:8px; padding:9px 12px; }
+  .hop { border:1px solid #e5e7eb; border-radius:10px; background:#fff; overflow:hidden; }
+  .hop.ovr { border-color:#f59e0b; }
+  .hop-hd { display:flex; align-items:center; gap:7px; padding:8px 12px; background:#f9fafb;
+            border-bottom:1px solid #eef2f7; font-size:13px; }
+  .hop.ovr .hop-hd { background:#fffbeb; }
+  .hop-n { font-size:11px; color:#94a3b8; font-variant-numeric:tabular-nums; min-width:16px; }
+  .face { width:20px; height:20px; border-radius:5px; color:#fff; font-size:11px; flex:none;
+          display:inline-flex; align-items:center; justify-content:center; }
+  .arrow { color:#94a3b8; }
+  .badge { margin-left:auto; font-size:11px; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .badge.ok { background:#dcfce7; color:#166534; }
+  .badge.ovr { background:#fef3c7; color:#92400e; font-weight:600; }
+  .hop-bd { padding:9px 12px; display:flex; flex-direction:column; gap:7px; }
+  .ovr-box { background:#fffbeb; border-left:3px solid #f59e0b; padding:7px 10px;
+             font-size:12px; border-radius:0 6px 6px 0; line-height:1.7; }
+  .ovr-box .strike { color:#b45309; text-decoration:line-through; }
+  .fi { font-size:12px; }
+  .fi-k { font-size:11px; color:#64748b; letter-spacing:.04em; margin-bottom:3px; }
+  .fi-k b { color:#334155; }
+  .fi-line { color:#334155; line-height:1.7; }
+  .fi-dim { color:#94a3b8; }
+  .fi-bad { color:#b91c1c; }
+  .fi-pre { margin:3px 0 0; padding:7px 9px; background:#0f172a; color:#e2e8f0; border-radius:6px;
+            font-family:ui-monospace,Consolas,monospace; font-size:11.5px; white-space:pre-wrap;
+            word-break:break-all; }
+  .flow-end { text-align:center; font-size:12px; color:#475569; padding:8px;
+              background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; }
+
+  /* ---------- 汇总答复里的 Markdown ---------- */
+  .md-h { font-size:13.5px; font-weight:700; color:#0f172a; margin:11px 0 5px; }
+  .md-p { font-size:13.5px; line-height:1.75; color:#1f2937; margin:3px 0; }
+  .md-ul { margin:4px 0 4px 20px; padding:0; font-size:13.5px; color:#1f2937; }
+  .md-ul li { margin:2px 0; line-height:1.7; }
+  .md code { background:#f1f5f9; color:#0f172a; padding:1px 5px; border-radius:4px;
+             font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  table.md { margin:8px 0 4px; }
+  table.md td, table.md th { font-variant-numeric:tabular-nums; }
+
+  /* ---------- 多轮对话的轮次分隔 ---------- */
+  .turnsep { display:flex; align-items:center; gap:10px; margin:14px 4px 4px; }
+  .turnsep::before, .turnsep::after { content:''; flex:1; height:1px; background:#e2e8f0; }
+  .turnsep span { font-size:11px; color:#94a3b8; white-space:nowrap; }
+
+  /* ---------- 原始结构（真实传过去的内容） ---------- */
+  .raw { margin-top:9px; border-top:1px dashed #e2e8f0; padding-top:8px; }
+  .raw > summary { cursor:pointer; font-size:11.5px; color:#475569; }
+  .raw > summary:hover { color:#0f172a; }
+  .raw-ev { margin-top:8px; }
+  .raw-ev + .raw-ev { border-top:1px solid #f1f5f9; padding-top:8px; }
+  .raw-hd { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+            font-size:11px; color:#334155; }
+  .raw-seq { color:#94a3b8; font-variant-numeric:tabular-nums; }
+  .raw-pre { margin:4px 0 0; padding:9px 11px; background:#0f172a; color:#cbd5e1;
+             border-radius:7px; font-family:ui-monospace,Consolas,monospace;
+             font-size:11px; line-height:1.6; white-space:pre-wrap; word-break:break-word;
+             max-height:420px; overflow:auto; }
+  .delta-tag { background:#0ea5e9; color:#fff; font-size:10px; padding:1px 6px;
+               border-radius:999px; }
+
+  html, body { height:auto !important; overflow:auto !important; }
+  body { padding:18px 16px 44px; background:#f5f7fa; }
+  .exp-wrap { max-width:1400px; margin:0 auto; }
+  .exp-hd { margin:0 4px 12px; }
+  .exp-hd h1 { font-size:16px; margin:0 0 4px; }
+  .exp-hd .m { font-size:11.5px; color:#6b7280; line-height:1.7; }
+  .exp-hd .m code { background:#eef2f7; border-radius:3px; padding:0 4px; }
+  .flow-bar .opt { display:none !important; }   /* 那个开关要 JS，静态页里没意义 */
+</style>
+</head>
+<body>
+<div class="exp-wrap">
+<div class="exp-hd">
+<h1>🔀 数据流转链路</h1>
+<div class="m">问题：先看一下库存小于 6 的商品有哪些，然后把它们的库存都补到 15 ，再根据被修改的数据查询有多少人购买了<br>导出时间 2026/9/16 18:39:12 · 共 124 条事件 · 数据来自 <code>agent_sql.agent_event</code>，可逐条回放<br>本文件样式已内联，不依赖任何外部资源（不用连网、不用起服务），双击即可打开。</div>
+</div>
+<div class="flow">
+    <div class="flow-bar">
+      <span>共 <b>12</b> 次流转</span>
+      <span>规划器复查 <b style="color:#92400e">2</b> 次</span>
+      <span>共享记忆 <b style="color:#0f766e">3</b> 条</span>
+      <span>护栏改道 <b>4</b> 次</span>
+      <span>轮次 <b>1</b></span>
+      <span>事件 <b>124</b> 条</span>
+      <span class="opt" id="flow-raw-toggle">收起全部原始结构</span>
+    </div>
+    <div class="fi fi-dim" style="padding:0 2px">
+      上面是人话摘要（我挑的字段）；每个卡片底部的「真实传递过去的内容」是**原样落库的完整结构** ——
+      包含节点 <code>return</code> 出去的状态增量（<span class="delta-tag">state_delta</span>），
+      那才是下一个智能体真正读到的东西。
+    </div><div class="flow-start">📥 <b>起点</b> · 用户提交问题：先看一下库存小于 6 的商品有哪些，然后把它们的库存都补到 15 ，再根据被修改的数据查询有多少人购买了
+        <div class="fi-dim" style="margin-top:3px">系统目录中的表：customers、order_items、orders、products</div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">1</span>
+        <span class="face" style="background:var(--planner)">规</span><span>规划器</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--generator)">生</span><span><b>SQL 生成</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 生成，护栏在允许范围内采纳</div><div class="fi"><div class="fi-k">产出 · <b>任务拆解</b></div><div class="fi-line">理解：用户想先查出库存小于 6 的商品，把这些商品的库存补到 15，再基于被修改的这些商品统计购买人数。</div><div class="fi-line">· <b>st-1</b> [查询] 查询库存小于 6 的商品（含商品标识与当前库存） <span class="fi-dim">· 完成标准：返回所有库存小于 6 的商品清单及其当前库存</span></div><div class="fi-line">· <b>st-2</b> [修改] 把上一步查出的这些商品的库存统一补到 15 <span class="fi-dim">依赖 st-1</span> <span class="fi-dim">· 完成标准：上一步查出的每个商品库存都被更新为 15，并给出受影响行数</span></div><div class="fi-line">· <b>st-3</b> [查询] 统计上一步被修改的那些商品各有多少人购买（购买人数） <span class="fi-dim">依赖 st-1</span> <span class="fi-dim">· 完成标准：给出被修改商品对应的购买人数统计结果</span></div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">12 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">chat_reply · cursor · intents · last_agent · mode · next_agent · plan_note · refusal · safety · status · understanding · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-1" open>
+        <summary>真实传递过去的内容 · 完整结构（3 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#324</span>
+            <b>plan</b>
+            <span class="fi-dim">role=planner · round=0 · version=0</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;mode&quot;: &quot;execute&quot;,
+  &quot;turn&quot;: 1,
+  &quot;phase&quot;: &quot;initial&quot;,
+  &quot;cursor&quot;: 0,
+  &quot;safety&quot;: &quot;安全。属于常规的查询与数据更新（把库存补到 15），未涉及 DDL、未访问系统表或越权 schema、未要求绕过授权。&quot;,
+  &quot;dropped&quot;: [],
+  &quot;intents&quot;: [
+    {
+      &quot;kind&quot;: &quot;查询&quot;,
+      &quot;intent&quot;: &quot;查询库存小于 6 的商品（含商品标识与当前库存）&quot;,
+      &quot;acceptance&quot;: &quot;返回所有库存小于 6 的商品清单及其当前库存&quot;,
+      &quot;depends_on&quot;: [],
+      &quot;sub_task_id&quot;: &quot;st-1&quot;
+    },
+    {
+      &quot;kind&quot;: &quot;修改&quot;,
+      &quot;intent&quot;: &quot;把上一步查出的这些商品的库存统一补到 15&quot;,
+      &quot;acceptance&quot;: &quot;上一步查出的每个商品库存都被更新为 15，并给出受影响行数&quot;,
+      &quot;depends_on&quot;: [
+        &quot;st-1&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-2&quot;
+    },
+    {
+      &quot;kind&quot;: &quot;查询&quot;,
+      &quot;intent&quot;: &quot;统计上一步被修改的那些商品各有多少人购买（购买人数）&quot;,
+      &quot;acceptance&quot;: &quot;给出被修改商品对应的购买人数统计结果&quot;,
+      &quot;depends_on&quot;: [
+        &quot;st-1&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-3&quot;
+    }
+  ],
+  &quot;refusal&quot;: null,
+  &quot;attempts&quot;: 1,
+  &quot;chat_reply&quot;: null,
+  &quot;plan_action&quot;: &quot;initial&quot;,
+  &quot;plan_reason&quot;: &quot;这是一个「查询 → 修改 → 基于修改结果再查询」的链式需求，拆成 3 个子任务：st-1 查库存小于 6 的商品；st-2 依赖 st-1，把这些商品的库存改为 15；st-3 依赖 st-1（被修改的数据即 st-1 查出的商品集合），统计这些商品的购买人数。用户提到的「先修正再生成再校验再返回」是系统内部链路，不额外拆任务。&quot;,
+  &quot;review_note&quot;: &quot;&quot;,
+  &quot;context_turns&quot;: [],
+  &quot;understanding&quot;: &quot;用户想先查出库存小于 6 的商品，把这些商品的库存补到 15，再基于被修改的这些商品统计购买人数。&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#326</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=planner · round=0 · version=0</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;chat_reply&quot;,
+    &quot;cursor&quot;,
+    &quot;intents&quot;,
+    &quot;last_agent&quot;,
+    &quot;mode&quot;,
+    &quot;next_agent&quot;,
+    &quot;plan_note&quot;,
+    &quot;refusal&quot;,
+    &quot;safety&quot;,
+    &quot;status&quot;,
+    &quot;understanding&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;mode&quot;: &quot;execute&quot;,
+    &quot;cursor&quot;: 0,
+    &quot;safety&quot;: &quot;安全。属于常规的查询与数据更新（把库存补到 15），未涉及 DDL、未访问系统表或越权 schema、未要求绕过授权。&quot;,
+    &quot;status&quot;: &quot;planning&quot;,
+    &quot;intents&quot;: [
+      {
+        &quot;kind&quot;: &quot;查询&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品（含商品标识与当前库存）&quot;,
+        &quot;acceptance&quot;: &quot;返回所有库存小于 6 的商品清单及其当前库存&quot;,
+        &quot;depends_on&quot;: [],
+        &quot;sub_task_id&quot;: &quot;st-1&quot;
+      },
+      {
+        &quot;kind&quot;: &quot;修改&quot;,
+        &quot;intent&quot;: &quot;把上一步查出的这些商品的库存统一补到 15&quot;,
+        &quot;acceptance&quot;: &quot;上一步查出的每个商品库存都被更新为 15，并给出受影响行数&quot;,
+        &quot;depends_on&quot;: [
+          &quot;st-1&quot;
+        ],
+        &quot;sub_task_id&quot;: &quot;st-2&quot;
+      },
+      {
+        &quot;kind&quot;: &quot;查询&quot;,
+        &quot;intent&quot;: &quot;统计上一步被修改的那些商品各有多少人购买（购买人数）&quot;,
+        &quot;acceptance&quot;: &quot;给出被修改商品对应的购买人数统计结果&quot;,
+        &quot;depends_on&quot;: [
+          &quot;st-1&quot;
+        ],
+        &quot;sub_task_id&quot;: &quot;st-3&quot;
+      }
+    ],
+    &quot;refusal&quot;: &quot;&quot;,
+    &quot;version&quot;: 1,
+    &quot;plan_note&quot;: &quot;&quot;,
+    &quot;chat_reply&quot;: &quot;&quot;,
+    &quot;last_agent&quot;: &quot;planner&quot;,
+    &quot;next_agent&quot;: &quot;generator&quot;,
+    &quot;understanding&quot;: &quot;用户想先查出库存小于 6 的商品，把这些商品的库存补到 15，再基于被修改的这些商品统计购买人数。&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#327</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=1</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;generator&quot;,
+  &quot;from&quot;: &quot;planner&quot;,
+  &quot;reason&quot;: &quot;为子任务 st-1 生成 SQL&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;generator&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">2</span>
+        <span class="face" style="background:var(--generator)">生</span><span>SQL 生成</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--validator)">校</span><span><b>SQL 校验</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 校验，护栏在允许范围内采纳</div><div class="fi"><div class="fi-k">产出 · <b>第一层选表</b>（只看表简述与关系）</div>
+      <div class="fi-line">选中：<b>order_items、products</b></div>
+      <div class="fi-line fi-dim">依据：当前子任务只需查询库存小于 6 的商品及其商品标识与当前库存，products 表包含商品名称、分类、单价、库存等字段，可直接满足筛选与输出需求。虽然整体任务后续还要统计购买人数（会用到 order_items、orders、customers），但本步仅做库存筛选，故只选 products。</div>
+      <div class="fi-line fi-dim">候选池：customers、order_items、orders、products</div></div><div class="fi"><div class="fi-k">产出 · <b>SQL</b>
+        <span class="risk r-只读">只读</span>
+        <span class="fi-dim">SELECT</span></div>
+      
+      <pre class="fi-pre">SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100</pre>
+      <div class="fi-line fi-dim">本步只需商品档案表 products 即可判定库存，条件为 stock &lt; 6（严格小于，不含等于 6）；order_items 在本步不参与过滤，仅作为后续「按被修改商品统计购买人数」的关联表，故此处不 JOIN，避免因无订单明细的商品被漏掉。输出 id/name/category/price/stock 便于后续补货与统计定位；加 LIMIT 100 防止全表返回。</div>
+      
+      </div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">9 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">checks · confirmed · draft · last_agent · next_agent · result · status · verdict · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-2" open>
+        <summary>真实传递过去的内容 · 完整结构（4 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#330</span>
+            <b>tables</b>
+            <span class="fi-dim">role=generator · round=0 · version=1</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;reason&quot;: &quot;当前子任务只需查询库存小于 6 的商品及其商品标识与当前库存，products 表包含商品名称、分类、单价、库存等字段，可直接满足筛选与输出需求。虽然整体任务后续还要统计购买人数（会用到 order_items、orders、customers），但本步仅做库存筛选，故只选 products。&quot;,
+  &quot;selected&quot;: [
+    &quot;order_items&quot;,
+    &quot;products&quot;
+  ],
+  &quot;candidates&quot;: [
+    &quot;customers&quot;,
+    &quot;order_items&quot;,
+    &quot;orders&quot;,
+    &quot;products&quot;
+  ]
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#332</span>
+            <b>sql</b>
+            <span class="fi-dim">role=generator · round=0 · version=1</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;draft&quot;: {
+    &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+    &quot;note&quot;: &quot;本步只需商品档案表 products 即可判定库存，条件为 stock &lt; 6（严格小于，不含等于 6）；order_items 在本步不参与过滤，仅作为后续「按被修改商品统计购买人数」的关联表，故此处不 JOIN，避免因无订单明细的商品被漏掉。输出 id/name/category/price/stock 便于后续补货与统计定位；加 LIMIT 100 防止全表返回。&quot;,
+    &quot;round&quot;: 0,
+    &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+    &quot;tables&quot;: [
+      &quot;order_items&quot;,
+      &quot;products&quot;
+    ],
+    &quot;sub_task_id&quot;: &quot;st-1&quot;
+  },
+  &quot;stage&quot;: &quot;generated&quot;,
+  &quot;verdict&quot;: {
+    &quot;level&quot;: &quot;只读&quot;,
+    &quot;notes&quot;: [],
+    &quot;action&quot;: &quot;SELECT&quot;,
+    &quot;tables&quot;: [
+      &quot;products&quot;
+    ],
+    &quot;reasons&quot;: [],
+    &quot;statements&quot;: 1,
+    &quot;needs_confirm&quot;: false
+  },
+  &quot;attempts&quot;: 1
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#334</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=generator · round=0 · version=1</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;checks&quot;,
+    &quot;confirmed&quot;,
+    &quot;draft&quot;,
+    &quot;last_agent&quot;,
+    &quot;next_agent&quot;,
+    &quot;result&quot;,
+    &quot;status&quot;,
+    &quot;verdict&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;draft&quot;: {
+      &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+      &quot;note&quot;: &quot;本步只需商品档案表 products 即可判定库存，条件为 stock &lt; 6（严格小于，不含等于 6）；order_items 在本步不参与过滤，仅作为后续「按被修改商品统计购买人数」的关联表，故此处不 JOIN，避免因无订单明细的商品被漏掉。输出 id/name/category/price/stock 便于后续补货与统计定位；加 LIMIT 100 防止全表返回。&quot;,
+      &quot;round&quot;: 0,
+      &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+      &quot;tables&quot;: [
+        &quot;order_items&quot;,
+        &quot;products&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-1&quot;
+    },
+    &quot;checks&quot;: null,
+    &quot;result&quot;: null,
+    &quot;status&quot;: &quot;generating&quot;,
+    &quot;verdict&quot;: {
+      &quot;level&quot;: &quot;只读&quot;,
+      &quot;notes&quot;: [],
+      &quot;action&quot;: &quot;SELECT&quot;,
+      &quot;tables&quot;: [
+        &quot;products&quot;
+      ],
+      &quot;reasons&quot;: [],
+      &quot;statements&quot;: 1,
+      &quot;needs_confirm&quot;: false
+    },
+    &quot;version&quot;: 2,
+    &quot;confirmed&quot;: false,
+    &quot;last_agent&quot;: &quot;generator&quot;,
+    &quot;next_agent&quot;: &quot;validator&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#335</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;validator&quot;,
+  &quot;from&quot;: &quot;generator&quot;,
+  &quot;reason&quot;: &quot;SQL 必须经过校验才能执行&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;validator&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">3</span>
+        <span class="face" style="background:var(--validator)">校</span><span>SQL 校验</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--executor)">执</span><span><b>SQL 执行</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 执行，护栏在允许范围内采纳</div><div class="fi"><div class="fi-line">✓ <b>静态防线（危险语句 / 多语句 / 表名授权）</b>
+      <span class="fi-dim">rt-static</span>
+      <div class="fi-dim" style="padding-left:14px">SELECT · 风险 只读</div></div></div><div class="fi"><div class="fi-line">✓ <b>SQL 涉及的表必须在生成器选定的表之内</b>
+      <span class="fi-dim">rt-intent-tables</span>
+      <div class="fi-dim" style="padding-left:14px">只用了生成器选定的表：order_items、products</div></div></div><div class="fi"><div class="fi-line">✓ <b>表和字段必须能在系统目录里对上（按表信息核对）</b>
+      <span class="fi-dim">rt-catalog</span>
+      <div class="fi-dim" style="padding-left:14px">表和字段都能在系统目录里对上（1 张表）</div></div></div><div class="fi"><div class="fi-line">✓ <b>校验阶段不访问数据库</b>
+      <span class="fi-dim">rt-no-db</span>
+      <div class="fi-dim" style="padding-left:14px">表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句</div></div></div><div class="fi"><div class="fi-line">✓ <b>表使用是否在授权范围内</b>
+      <span class="fi-dim">ck-1</span>
+      <div class="fi-dim" style="padding-left:14px">仅使用 products，属于生成器选定的 order_items、products 之内</div></div></div><div class="fi"><div class="fi-line">✓ <b>字段是否与系统目录一致</b>
+      <span class="fi-dim">ck-2</span>
+      <div class="fi-dim" style="padding-left:14px">p.id / p.name / p.category / p.price / p.stock 均存在于 products 表定义中</div></div></div><div class="fi"><div class="fi-line">✓ <b>WHERE 是否覆盖任务限定「库存小于 6」</b>
+      <span class="fi-dim">ck-3</span>
+      <div class="fi-dim" style="padding-left:14px">p.stock &lt; 6 精确对应，未额外引入会漏掉数据的过滤条件</div></div></div><div class="fi"><div class="fi-line">✓ <b>是否包含任务要求的商品标识与当前库存</b>
+      <span class="fi-dim">ck-4</span>
+      <div class="fi-dim" style="padding-left:14px">输出 p.id（商品标识）与 p.stock（当前库存），并附带 name/category/price 作为补充信息</div></div></div><div class="fi"><div class="fi-line">✓ <b>聚合与 GROUP BY 是否配套</b>
+      <span class="fi-dim">ck-5</span>
+      <div class="fi-dim" style="padding-left:14px">无聚合函数，无需 GROUP BY</div></div></div><div class="fi"><div class="fi-line">✓ <b>JOIN 条件是否合理</b>
+      <span class="fi-dim">ck-6</span>
+      <div class="fi-dim" style="padding-left:14px">本查询为单表查询，无 JOIN，不涉及 order_items</div></div></div><div class="fi"><div class="fi-line">✓ <b>是否只读且无多语句/注释</b>
+      <span class="fi-dim">ck-7</span>
+      <div class="fi-dim" style="padding-left:14px">单条 SELECT，无分号结尾、无注释、无写操作</div></div></div><div class="fi"><div class="fi-line">✓ <b>运行时确定性检查结果</b>
+      <span class="fi-dim">ck-8</span>
+      <div class="fi-dim" style="padding-left:14px">rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass</div></div></div><div class="fi"><div class="fi-line">校验结论：<b>通过</b>
+      
+      <div class="fi-dim" style="padding-left:14px">任务只要求查询库存小于 6 的商品（含商品标识与当前库存）。SQL 从 products 表选取 id、name、category、price、stock，WHERE p.stock &lt; 6 精确覆盖了「库存小于 6」的限定，ORDER BY stock ASC, id ASC 与 LIMIT 100 只是排序与截断，不影响结果正确性。表 products 在生成器选定表范围内，字段 id/name/category/price/stock 均与系统目录一致，无 JOIN、无聚合，不存在 GROUP BY 配套问题。运行时四项确定性检查全部 pass，故判定通过。</div></div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">7 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">attempts · checks · history · last_agent · next_agent · status · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-3" open>
+        <summary>真实传递过去的内容 · 完整结构（15 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#338</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;静态防线（危险语句 / 多语句 / 表名授权）&quot;,
+  &quot;detail&quot;: &quot;SELECT · 风险 只读&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-static&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#339</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;SQL 涉及的表必须在生成器选定的表之内&quot;,
+  &quot;detail&quot;: &quot;只用了生成器选定的表：order_items、products&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-intent-tables&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#340</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;表和字段必须能在系统目录里对上（按表信息核对）&quot;,
+  &quot;detail&quot;: &quot;表和字段都能在系统目录里对上（1 张表）&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-catalog&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#341</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;校验阶段不访问数据库&quot;,
+  &quot;detail&quot;: &quot;表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-no-db&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#342</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;表使用是否在授权范围内&quot;,
+  &quot;detail&quot;: &quot;仅使用 products，属于生成器选定的 order_items、products 之内&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-1&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#343</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;字段是否与系统目录一致&quot;,
+  &quot;detail&quot;: &quot;p.id / p.name / p.category / p.price / p.stock 均存在于 products 表定义中&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-2&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#344</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;WHERE 是否覆盖任务限定「库存小于 6」&quot;,
+  &quot;detail&quot;: &quot;p.stock &lt; 6 精确对应，未额外引入会漏掉数据的过滤条件&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-3&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#345</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;是否包含任务要求的商品标识与当前库存&quot;,
+  &quot;detail&quot;: &quot;输出 p.id（商品标识）与 p.stock（当前库存），并附带 name/category/price 作为补充信息&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-4&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#346</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;聚合与 GROUP BY 是否配套&quot;,
+  &quot;detail&quot;: &quot;无聚合函数，无需 GROUP BY&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-5&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#347</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;JOIN 条件是否合理&quot;,
+  &quot;detail&quot;: &quot;本查询为单表查询，无 JOIN，不涉及 order_items&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-6&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#348</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;是否只读且无多语句/注释&quot;,
+  &quot;detail&quot;: &quot;单条 SELECT，无分号结尾、无注释、无写操作&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-7&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#349</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;运行时确定性检查结果&quot;,
+  &quot;detail&quot;: &quot;rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-8&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#350</span>
+            <b>verdict</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;passed&quot;: true,
+  &quot;reason&quot;: &quot;任务只要求查询库存小于 6 的商品（含商品标识与当前库存）。SQL 从 products 表选取 id、name、category、price、stock，WHERE p.stock &lt; 6 精确覆盖了「库存小于 6」的限定，ORDER BY stock ASC, id ASC 与 LIMIT 100 只是排序与截断，不影响结果正确性。表 products 在生成器选定表范围内，字段 id/name/category/price/stock 均与系统目录一致，无 JOIN、无聚合，不存在 GROUP BY 配套问题。运行时四项确定性检查全部 pass，故判定通过。&quot;,
+  &quot;static&quot;: &quot;SELECT · 风险 只读&quot;,
+  &quot;forced_by_runtime&quot;: false
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#352</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=validator · round=0 · version=2</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;attempts&quot;,
+    &quot;checks&quot;,
+    &quot;history&quot;,
+    &quot;last_agent&quot;,
+    &quot;next_agent&quot;,
+    &quot;status&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;checks&quot;: {
+      &quot;checks&quot;: [
+        {
+          &quot;item&quot;: &quot;静态防线（危险语句 / 多语句 / 表名授权）&quot;,
+          &quot;detail&quot;: &quot;SELECT · 风险 只读&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-static&quot;
+        },
+        {
+          &quot;item&quot;: &quot;SQL 涉及的表必须在生成器选定的表之内&quot;,
+          &quot;detail&quot;: &quot;只用了生成器选定的表：order_items、products&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-intent-tables&quot;
+        },
+        {
+          &quot;item&quot;: &quot;表和字段必须能在系统目录里对上（按表信息核对）&quot;,
+          &quot;detail&quot;: &quot;表和字段都能在系统目录里对上（1 张表）&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-catalog&quot;
+        },
+        {
+          &quot;item&quot;: &quot;校验阶段不访问数据库&quot;,
+          &quot;detail&quot;: &quot;表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-no-db&quot;
+        },
+        {
+          &quot;item&quot;: &quot;表使用是否在授权范围内&quot;,
+          &quot;detail&quot;: &quot;仅使用 products，属于生成器选定的 order_items、products 之内&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-1&quot;
+        },
+        {
+          &quot;item&quot;: &quot;字段是否与系统目录一致&quot;,
+          &quot;detail&quot;: &quot;p.id / p.name / p.category / p.price / p.stock 均存在于 products 表定义中&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-2&quot;
+        },
+        {
+          &quot;item&quot;: &quot;WHERE 是否覆盖任务限定「库存小于 6」&quot;,
+          &quot;detail&quot;: &quot;p.stock &lt; 6 精确对应，未额外引入会漏掉数据的过滤条件&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-3&quot;
+        },
+        {
+          &quot;item&quot;: &quot;是否包含任务要求的商品标识与当前库存&quot;,
+          &quot;detail&quot;: &quot;输出 p.id（商品标识）与 p.stock（当前库存），并附带 name/category/price 作为补充信息&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-4&quot;
+        },
+        {
+          &quot;item&quot;: &quot;聚合与 GROUP BY 是否配套&quot;,
+          &quot;detail&quot;: &quot;无聚合函数，无需 GROUP BY&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-5&quot;
+        },
+        {
+          &quot;item&quot;: &quot;JOIN 条件是否合理&quot;,
+          &quot;detail&quot;: &quot;本查询为单表查询，无 JOIN，不涉及 order_items&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-6&quot;
+        },
+        {
+          &quot;item&quot;: &quot;是否只读且无多语句/注释&quot;,
+          &quot;detail&quot;: &quot;单条 SELECT，无分号结尾、无注释、无写操作&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-7&quot;
+        },
+        {
+          &quot;item&quot;: &quot;运行时确定性检查结果&quot;,
+          &quot;detail&quot;: &quot;rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-8&quot;
+        }
+      ],
+      &quot;passed&quot;: true,
+      &quot;reason&quot;: &quot;任务只要求查询库存小于 6 的商品（含商品标识与当前库存）。SQL 从 products 表选取 id、name、category、price、stock，WHERE p.stock &lt; 6 精确覆盖了「库存小于 6」的限定，ORDER BY stock ASC, id ASC 与 LIMIT 100 只是排序与截断，不影响结果正确性。表 products 在生成器选定表范围内，字段 id/name/category/price/stock 均与系统目录一致，无 JOIN、无聚合，不存在 GROUP BY 配套问题。运行时四项确定性检查全部 pass，故判定通过。&quot;,
+      &quot;forced_by_runtime&quot;: false
+    },
+    &quot;status&quot;: &quot;validating&quot;,
+    &quot;history&quot;: [
+      {
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: null,
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;exec_ok&quot;: null,
+        &quot;executed&quot;: false,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: null,
+        &quot;validated_passed&quot;: true
+      }
+    ],
+    &quot;version&quot;: 3,
+    &quot;attempts&quot;: [
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      }
+    ],
+    &quot;last_agent&quot;: &quot;validator&quot;,
+    &quot;next_agent&quot;: &quot;executor&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#353</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=3</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;executor&quot;,
+  &quot;from&quot;: &quot;validator&quot;,
+  &quot;reason&quot;: &quot;校验通过，可以执行&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;executor&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ovr">
+      <div class="hop-hd">
+        <span class="hop-n">4</span>
+        <span class="face" style="background:var(--executor)">执</span><span>SQL 执行</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--planner)">规</span><span><b>规划器</b></span>
+        <span class="badge ovr">
+          护栏改道</span>
+      </div>
+      <div class="hop-bd"><div class="ovr-box">
+        模型建议交给 <span class="strike">结束</span>
+        　→　护栏改去 <b>规划器</b>
+        <div class="fi-dim">理由：子任务 st-1 已执行完成，回到规划器复查剩余 2 个任务是否仍成立</div></div><div class="fi"><div class="fi-k">产出 · <b>执行结果</b></div>
+      <div class="fi-line">✓ 成功 · 影响/返回 <b>6</b> 行
+        <span class="fi-dim">3ms</span></div>
+      </div><div class="fi"><div class="fi-k">产出 · <b>🧠 共享记忆</b>
+        <span class="delta-tag">agent_memory</span>
+        <span class="fi-dim">只有执行器真跑过的才算事实</span></div>
+      <div class="fi-line">查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存 —— 查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。</div>
+      <div class="fi-line fi-dim">来源 sql_id=27 · 6 行
+        · 已核对</div><div class="fi-line fi-dim">可复用实体：products.id = 2、4、6、7、8、10</div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">11 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">attempts · confirmed · cursor · explain · history · last_agent · memory · next_agent · result · status · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-4" open>
+        <summary>真实传递过去的内容 · 完整结构（4 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#355</span>
+            <b>result</b>
+            <span class="fi-dim">role=executor · round=0 · version=3</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;ok&quot;: true,
+  &quot;kind&quot;: &quot;rows&quot;,
+  &quot;rows&quot;: [
+    [
+      2,
+      &quot;无线鼠标 M3&quot;,
+      &quot;外设&quot;,
+      159,
+      5
+    ],
+    [
+      4,
+      &quot;USB-C 扩展坞&quot;,
+      &quot;外设&quot;,
+      249,
+      5
+    ],
+    [
+      6,
+      &quot;降噪耳机 Air&quot;,
+      &quot;音频&quot;,
+      899,
+      5
+    ],
+    [
+      7,
+      &quot;移动硬盘 1T&quot;,
+      &quot;存储&quot;,
+      459,
+      5
+    ],
+    [
+      8,
+      &quot;机械臂显示器架&quot;,
+      &quot;显示&quot;,
+      699,
+      5
+    ],
+    [
+      10,
+      &quot;4K 摄像头&quot;,
+      &quot;影音&quot;,
+      599,
+      5
+    ]
+  ],
+  &quot;columns&quot;: [
+    &quot;id&quot;,
+    &quot;name&quot;,
+    &quot;category&quot;,
+    &quot;price&quot;,
+    &quot;stock&quot;
+  ],
+  &quot;rowcount&quot;: 6,
+  &quot;truncated&quot;: false,
+  &quot;duration_ms&quot;: 3
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#357</span>
+            <b>memory</b>
+            <span class="fi-dim">role=executor · round=0 · version=3</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;claim&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存 —— 查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。&quot;,
+  &quot;saved&quot;: &quot;st-1&quot;,
+  &quot;sql_id&quot;: 27,
+  &quot;entities&quot;: {
+    &quot;key&quot;: &quot;id&quot;,
+    &quot;table&quot;: &quot;products&quot;,
+    &quot;values&quot;: [
+      2,
+      4,
+      6,
+      7,
+      8,
+      10
+    ]
+  },
+  &quot;rowcount&quot;: 6,
+  &quot;verified&quot;: true
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#359</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=executor · round=0 · version=3</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;attempts&quot;,
+    &quot;confirmed&quot;,
+    &quot;cursor&quot;,
+    &quot;explain&quot;,
+    &quot;history&quot;,
+    &quot;last_agent&quot;,
+    &quot;memory&quot;,
+    &quot;next_agent&quot;,
+    &quot;result&quot;,
+    &quot;status&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;cursor&quot;: 1,
+    &quot;memory&quot;: [
+      {
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;claim&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存 —— 查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。&quot;,
+        &quot;round&quot;: 0,
+        &quot;stage&quot;: &quot;executed&quot;,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;mem_id&quot;: 9,
+        &quot;sql_id&quot;: 27,
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;entities&quot;: {
+          &quot;key&quot;: &quot;id&quot;,
+          &quot;table&quot;: &quot;products&quot;,
+          &quot;values&quot;: [
+            2,
+            4,
+            6,
+            7,
+            8,
+            10
+          ]
+        },
+        &quot;rowcount&quot;: 6,
+        &quot;sql_text&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;verified&quot;: true,
+        &quot;created_at&quot;: &quot;2026-09-16T10:25:17.660399+00:00&quot;,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;global_task_id&quot;: &quot;180f196f-88e1-4751-8e2a-5c4fc3b61d83&quot;
+      }
+    ],
+    &quot;result&quot;: {
+      &quot;ok&quot;: true,
+      &quot;kind&quot;: &quot;rows&quot;,
+      &quot;rows&quot;: [
+        [
+          2,
+          &quot;无线鼠标 M3&quot;,
+          &quot;外设&quot;,
+          159,
+          5
+        ],
+        [
+          4,
+          &quot;USB-C 扩展坞&quot;,
+          &quot;外设&quot;,
+          249,
+          5
+        ],
+        [
+          6,
+          &quot;降噪耳机 Air&quot;,
+          &quot;音频&quot;,
+          899,
+          5
+        ],
+        [
+          7,
+          &quot;移动硬盘 1T&quot;,
+          &quot;存储&quot;,
+          459,
+          5
+        ],
+        [
+          8,
+          &quot;机械臂显示器架&quot;,
+          &quot;显示&quot;,
+          699,
+          5
+        ],
+        [
+          10,
+          &quot;4K 摄像头&quot;,
+          &quot;影音&quot;,
+          599,
+          5
+        ]
+      ],
+      &quot;columns&quot;: [
+        &quot;id&quot;,
+        &quot;name&quot;,
+        &quot;category&quot;,
+        &quot;price&quot;,
+        &quot;stock&quot;
+      ],
+      &quot;rowcount&quot;: 6,
+      &quot;truncated&quot;: false,
+      &quot;error_hint&quot;: &quot;&quot;,
+      &quot;duration_ms&quot;: 3,
+      &quot;model_summary&quot;: &quot;查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。&quot;
+    },
+    &quot;status&quot;: &quot;executing&quot;,
+    &quot;explain&quot;: {
+      &quot;ok&quot;: true,
+      &quot;plan&quot;: [
+        {
+          &quot;Plan&quot;: {
+            &quot;Plans&quot;: [
+              {
+                &quot;Plans&quot;: [
+                  {
+                    &quot;Alias&quot;: &quot;p&quot;,
+                    &quot;Filter&quot;: &quot;(stock &lt; 6)&quot;,
+                    &quot;Disabled&quot;: false,
+                    &quot;Node Type&quot;: &quot;Seq Scan&quot;,
+                    &quot;Plan Rows&quot;: 233,
+                    &quot;Plan Width&quot;: 88,
+                    &quot;Total Cost&quot;: 18.75,
+                    &quot;Startup Cost&quot;: 0,
+                    &quot;Async Capable&quot;: false,
+                    &quot;Relation Name&quot;: &quot;products&quot;,
+                    &quot;Parallel Aware&quot;: false,
+                    &quot;Parent Relationship&quot;: &quot;Outer&quot;
+                  }
+                ],
+                &quot;Disabled&quot;: false,
+                &quot;Sort Key&quot;: [
+                  &quot;stock&quot;,
+                  &quot;id&quot;
+                ],
+                &quot;Node Type&quot;: &quot;Sort&quot;,
+                &quot;Plan Rows&quot;: 233,
+                &quot;Plan Width&quot;: 88,
+                &quot;Total Cost&quot;: 28.24,
+                &quot;Startup Cost&quot;: 27.66,
+                &quot;Async Capable&quot;: false,
+                &quot;Parallel Aware&quot;: false,
+                &quot;Parent Relationship&quot;: &quot;Outer&quot;
+              }
+            ],
+            &quot;Disabled&quot;: false,
+            &quot;Node Type&quot;: &quot;Limit&quot;,
+            &quot;Plan Rows&quot;: 100,
+            &quot;Plan Width&quot;: 88,
+            &quot;Total Cost&quot;: 27.91,
+            &quot;Startup Cost&quot;: 27.66,
+            &quot;Async Capable&quot;: false,
+            &quot;Parallel Aware&quot;: false
+          }
+        }
+      ],
+      &quot;est_rows&quot;: 100,
+      &quot;node_type&quot;: &quot;Limit&quot;
+    },
+    &quot;history&quot;: [
+      {
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;duration_ms&quot;: 3,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      }
+    ],
+    &quot;version&quot;: 4,
+    &quot;attempts&quot;: [
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      }
+    ],
+    &quot;confirmed&quot;: false,
+    &quot;last_agent&quot;: &quot;executor&quot;,
+    &quot;next_agent&quot;: &quot;done&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#360</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=4</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;planner&quot;,
+  &quot;from&quot;: &quot;executor&quot;,
+  &quot;reason&quot;: &quot;子任务 st-1 已执行完成，回到规划器复查剩余 2 个任务是否仍成立&quot;,
+  &quot;overridden&quot;: true,
+  &quot;model_wanted&quot;: &quot;done&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">5</span>
+        <span class="face" style="background:var(--planner)">规</span><span>规划器</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--generator)">生</span><span><b>SQL 生成</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 生成，护栏在允许范围内采纳</div><div class="fi"><div class="fi-k">产出 · <b>🔁 规划器复查</b> <span class="fi-dim">调整后续任务</span></div><div class="fi-line">复查结论：st-1 已成功执行，返回 6 条库存&lt;6 的商品，ID 明确为 2、4、6、7、8、10，满足 st-2/st-3 的前提。因此剩余计划整体成立，只需把「上一步那些商品」的含糊表述替换为具体商品 ID 集合，让生成器取到确定范围。st-2 为修改（把库存统一更新为 15），st-3 为查询（统计这 6 个商品各自的购买人数），两者都依赖 st-1 的商品集合。任务数不变，继续执行。</div><div class="fi-line">✓ <b>st-1</b> [查询] 查询库存小于 6 的商品（含商品标识与当前库存） <span class="fi-dim">· 完成标准：返回库存&lt;6 的商品清单，含商品 ID 与当前库存</span></div><div class="fi-line">· <b>st-2</b> [修改] 把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15 <span class="fi-dim">依赖 st-1</span> <span class="fi-dim">· 完成标准：这 6 个商品的库存均被更新为 15，并返回受影响行数</span></div><div class="fi-line">· <b>st-3</b> [查询] 统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数） <span class="fi-dim">依赖 st-1</span> <span class="fi-dim">· 完成标准：返回这 6 个商品各自的购买人数</span></div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">18 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">chat_reply · checks · confirmed · cursor · draft · intents · last_agent · mode · next_agent · plan_note · refusal · replanned_cursor · result · safety · status · understanding · verdict · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-5" open>
+        <summary>真实传递过去的内容 · 完整结构（3 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#363</span>
+            <b>plan</b>
+            <span class="fi-dim">role=planner · round=0 · version=4</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;mode&quot;: &quot;execute&quot;,
+  &quot;turn&quot;: 1,
+  &quot;phase&quot;: &quot;revise&quot;,
+  &quot;cursor&quot;: 1,
+  &quot;safety&quot;: &quot;安全。仅涉及商品库存的常规更新与购买人数统计查询，无 DDL、无越权访问、无绕过授权。&quot;,
+  &quot;dropped&quot;: [],
+  &quot;intents&quot;: [
+    {
+      &quot;kind&quot;: &quot;查询&quot;,
+      &quot;intent&quot;: &quot;查询库存小于 6 的商品（含商品标识与当前库存）&quot;,
+      &quot;acceptance&quot;: &quot;返回库存&lt;6 的商品清单，含商品 ID 与当前库存&quot;,
+      &quot;depends_on&quot;: [],
+      &quot;sub_task_id&quot;: &quot;st-1&quot;
+    },
+    {
+      &quot;kind&quot;: &quot;修改&quot;,
+      &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15&quot;,
+      &quot;acceptance&quot;: &quot;这 6 个商品的库存均被更新为 15，并返回受影响行数&quot;,
+      &quot;depends_on&quot;: [
+        &quot;st-1&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-2&quot;
+    },
+    {
+      &quot;kind&quot;: &quot;查询&quot;,
+      &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数）&quot;,
+      &quot;acceptance&quot;: &quot;返回这 6 个商品各自的购买人数&quot;,
+      &quot;depends_on&quot;: [
+        &quot;st-1&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-3&quot;
+    }
+  ],
+  &quot;refusal&quot;: null,
+  &quot;attempts&quot;: 1,
+  &quot;chat_reply&quot;: null,
+  &quot;plan_action&quot;: &quot;revise&quot;,
+  &quot;plan_reason&quot;: &quot;st-1 已实际执行并返回 6 个具体商品 ID（2、4、6、7、8、10），后续两步的前提已满足。原描述「上一步查出的这些商品」在拿到具体值后应明确为这 6 个 ID，避免生成器范围含糊。st-3 依赖 st-1 的商品集合即可（购买人数统计基于被修改的商品），无需依赖 st-2 的执行结果。&quot;,
+  &quot;review_note&quot;: &quot;st-1 已成功执行，返回 6 条库存&lt;6 的商品，ID 明确为 2、4、6、7、8、10，满足 st-2/st-3 的前提。因此剩余计划整体成立，只需把「上一步那些商品」的含糊表述替换为具体商品 ID 集合，让生成器取到确定范围。st-2 为修改（把库存统一更新为 15），st-3 为查询（统计这 6 个商品各自的购买人数），两者都依赖 st-1 的商品集合。任务数不变，继续执行。&quot;,
+  &quot;context_turns&quot;: [],
+  &quot;understanding&quot;: &quot;先查库存&lt;6的商品，把它们库存补到15，再统计这些被改商品各有多少人购买。&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#365</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=planner · round=0 · version=4</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;chat_reply&quot;,
+    &quot;checks&quot;,
+    &quot;confirmed&quot;,
+    &quot;cursor&quot;,
+    &quot;draft&quot;,
+    &quot;intents&quot;,
+    &quot;last_agent&quot;,
+    &quot;mode&quot;,
+    &quot;next_agent&quot;,
+    &quot;plan_note&quot;,
+    &quot;refusal&quot;,
+    &quot;replanned_cursor&quot;,
+    &quot;result&quot;,
+    &quot;safety&quot;,
+    &quot;status&quot;,
+    &quot;understanding&quot;,
+    &quot;verdict&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;mode&quot;: &quot;execute&quot;,
+    &quot;draft&quot;: null,
+    &quot;checks&quot;: null,
+    &quot;cursor&quot;: 1,
+    &quot;result&quot;: null,
+    &quot;safety&quot;: &quot;安全。仅涉及商品库存的常规更新与购买人数统计查询，无 DDL、无越权访问、无绕过授权。&quot;,
+    &quot;status&quot;: &quot;planning&quot;,
+    &quot;intents&quot;: [
+      {
+        &quot;kind&quot;: &quot;查询&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品（含商品标识与当前库存）&quot;,
+        &quot;acceptance&quot;: &quot;返回库存&lt;6 的商品清单，含商品 ID 与当前库存&quot;,
+        &quot;depends_on&quot;: [],
+        &quot;sub_task_id&quot;: &quot;st-1&quot;
+      },
+      {
+        &quot;kind&quot;: &quot;修改&quot;,
+        &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15&quot;,
+        &quot;acceptance&quot;: &quot;这 6 个商品的库存均被更新为 15，并返回受影响行数&quot;,
+        &quot;depends_on&quot;: [
+          &quot;st-1&quot;
+        ],
+        &quot;sub_task_id&quot;: &quot;st-2&quot;
+      },
+      {
+        &quot;kind&quot;: &quot;查询&quot;,
+        &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数）&quot;,
+        &quot;acceptance&quot;: &quot;返回这 6 个商品各自的购买人数&quot;,
+        &quot;depends_on&quot;: [
+          &quot;st-1&quot;
+        ],
+        &quot;sub_task_id&quot;: &quot;st-3&quot;
+      }
+    ],
+    &quot;refusal&quot;: &quot;&quot;,
+    &quot;verdict&quot;: {},
+    &quot;version&quot;: 5,
+    &quot;confirmed&quot;: false,
+    &quot;plan_note&quot;: &quot;复查（已完成 1 个）：st-1 已成功执行，返回 6 条库存&lt;6 的商品，ID 明确为 2、4、6、7、8、10，满足 st-2/st-3 的前提。因此剩余计划整体成立，只需把「上一步那些商品」的含糊表述替换为具体商品 ID 集合，让生成器取到确定范围。st-2 为修改（把库存统一更新为 15），st-3 为查询（统计这 6 个商品各自的购买人数），两者都依赖 st-1 的商品集合。任务数不变，继续执行。&quot;,
+    &quot;chat_reply&quot;: &quot;&quot;,
+    &quot;last_agent&quot;: &quot;planner&quot;,
+    &quot;next_agent&quot;: &quot;generator&quot;,
+    &quot;understanding&quot;: &quot;先查库存&lt;6的商品，把它们库存补到15，再统计这些被改商品各有多少人购买。&quot;,
+    &quot;replanned_cursor&quot;: 1
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#366</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=5</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;generator&quot;,
+  &quot;from&quot;: &quot;planner&quot;,
+  &quot;reason&quot;: &quot;为子任务 st-2 生成 SQL&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;generator&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ovr">
+      <div class="hop-hd">
+        <span class="hop-n">6</span>
+        <span class="face" style="background:var(--generator)">生</span><span>SQL 生成</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--validator)">校</span><span><b>SQL 校验</b></span>
+        <span class="badge ovr">
+          护栏改道</span>
+      </div>
+      <div class="hop-bd"><div class="ovr-box">
+        模型建议交给 <span class="strike">SQL 执行</span>
+        　→　护栏改去 <b>SQL 校验</b>
+        <div class="fi-dim">理由：SQL 还没校验，不能跳过校验 ⇒ 护栏改去校验器（模型想交给执行智能体）</div></div><div class="fi"><div class="fi-k">产出 · <b>第一层选表</b>（只看表简述与关系）</div>
+      <div class="fi-line">选中：<b>order_items、products</b></div>
+      <div class="fi-line fi-dim">依据：本子任务只做「把商品 ID 为 2、4、6、7、8、10 的库存统一更新为 15」这一修改操作，库存字段在 products 表中，因此只需 products 表。后续「查询有多少人购买了这些商品」的子任务才会用到 order_items 与 orders（可能还有 customers），但本步不涉及。</div>
+      <div class="fi-line fi-dim">候选池：customers、order_items、orders、products</div></div><div class="fi"><div class="fi-k">产出 · <b>SQL</b>
+        <span class="risk r-写入">写入</span>
+        <span class="fi-dim">UPDATE</span></div>
+      
+      <pre class="fi-pre">UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock</pre>
+      <div class="fi-line fi-dim">依据 st-1 已执行查询确认的低库存商品 ID 列表（2、4、6、7、8、10），直接用 IN 列表作为 WHERE 条件，避免用 stock&lt;6 这类代理条件（更新后条件会失效且可能误伤）。UPDATE 带 WHERE 限定这 6 行；RETURNING 返回被修改行的 id/name/stock，可用于核对 6 行均被更新为 15（受影响行数即返回行数）。本步只涉及 products 表，order_items 留给下一步统计购买人数。</div>
+      
+      </div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">9 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">checks · confirmed · draft · last_agent · next_agent · result · status · verdict · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-6" open>
+        <summary>真实传递过去的内容 · 完整结构（4 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#369</span>
+            <b>tables</b>
+            <span class="fi-dim">role=generator · round=0 · version=5</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;reason&quot;: &quot;本子任务只做「把商品 ID 为 2、4、6、7、8、10 的库存统一更新为 15」这一修改操作，库存字段在 products 表中，因此只需 products 表。后续「查询有多少人购买了这些商品」的子任务才会用到 order_items 与 orders（可能还有 customers），但本步不涉及。&quot;,
+  &quot;selected&quot;: [
+    &quot;order_items&quot;,
+    &quot;products&quot;
+  ],
+  &quot;candidates&quot;: [
+    &quot;customers&quot;,
+    &quot;order_items&quot;,
+    &quot;orders&quot;,
+    &quot;products&quot;
+  ]
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#371</span>
+            <b>sql</b>
+            <span class="fi-dim">role=generator · round=0 · version=5</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;draft&quot;: {
+    &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+    &quot;note&quot;: &quot;依据 st-1 已执行查询确认的低库存商品 ID 列表（2、4、6、7、8、10），直接用 IN 列表作为 WHERE 条件，避免用 stock&lt;6 这类代理条件（更新后条件会失效且可能误伤）。UPDATE 带 WHERE 限定这 6 行；RETURNING 返回被修改行的 id/name/stock，可用于核对 6 行均被更新为 15（受影响行数即返回行数）。本步只涉及 products 表，order_items 留给下一步统计购买人数。&quot;,
+    &quot;round&quot;: 0,
+    &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数&quot;,
+    &quot;tables&quot;: [
+      &quot;order_items&quot;,
+      &quot;products&quot;
+    ],
+    &quot;sub_task_id&quot;: &quot;st-2&quot;
+  },
+  &quot;stage&quot;: &quot;generated&quot;,
+  &quot;verdict&quot;: {
+    &quot;level&quot;: &quot;写入&quot;,
+    &quot;notes&quot;: [],
+    &quot;action&quot;: &quot;UPDATE&quot;,
+    &quot;tables&quot;: [
+      &quot;products&quot;
+    ],
+    &quot;reasons&quot;: [],
+    &quot;statements&quot;: 1,
+    &quot;needs_confirm&quot;: false
+  },
+  &quot;attempts&quot;: 1
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#373</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=generator · round=0 · version=5</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;checks&quot;,
+    &quot;confirmed&quot;,
+    &quot;draft&quot;,
+    &quot;last_agent&quot;,
+    &quot;next_agent&quot;,
+    &quot;result&quot;,
+    &quot;status&quot;,
+    &quot;verdict&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;draft&quot;: {
+      &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+      &quot;note&quot;: &quot;依据 st-1 已执行查询确认的低库存商品 ID 列表（2、4、6、7、8、10），直接用 IN 列表作为 WHERE 条件，避免用 stock&lt;6 这类代理条件（更新后条件会失效且可能误伤）。UPDATE 带 WHERE 限定这 6 行；RETURNING 返回被修改行的 id/name/stock，可用于核对 6 行均被更新为 15（受影响行数即返回行数）。本步只涉及 products 表，order_items 留给下一步统计购买人数。&quot;,
+      &quot;round&quot;: 0,
+      &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数&quot;,
+      &quot;tables&quot;: [
+        &quot;order_items&quot;,
+        &quot;products&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-2&quot;
+    },
+    &quot;checks&quot;: null,
+    &quot;result&quot;: null,
+    &quot;status&quot;: &quot;generating&quot;,
+    &quot;verdict&quot;: {
+      &quot;level&quot;: &quot;写入&quot;,
+      &quot;notes&quot;: [],
+      &quot;action&quot;: &quot;UPDATE&quot;,
+      &quot;tables&quot;: [
+        &quot;products&quot;
+      ],
+      &quot;reasons&quot;: [],
+      &quot;statements&quot;: 1,
+      &quot;needs_confirm&quot;: false
+    },
+    &quot;version&quot;: 6,
+    &quot;confirmed&quot;: false,
+    &quot;last_agent&quot;: &quot;generator&quot;,
+    &quot;next_agent&quot;: &quot;executor&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#374</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;validator&quot;,
+  &quot;from&quot;: &quot;generator&quot;,
+  &quot;reason&quot;: &quot;SQL 还没校验，不能跳过校验 ⇒ 护栏改去校验器（模型想交给执行智能体）&quot;,
+  &quot;overridden&quot;: true,
+  &quot;model_wanted&quot;: &quot;executor&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">7</span>
+        <span class="face" style="background:var(--validator)">校</span><span>SQL 校验</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--executor)">执</span><span><b>SQL 执行</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 执行，护栏在允许范围内采纳</div><div class="fi"><div class="fi-line">✓ <b>静态防线（危险语句 / 多语句 / 表名授权）</b>
+      <span class="fi-dim">rt-static</span>
+      <div class="fi-dim" style="padding-left:14px">UPDATE · 风险 写入</div></div></div><div class="fi"><div class="fi-line">✓ <b>SQL 涉及的表必须在生成器选定的表之内</b>
+      <span class="fi-dim">rt-intent-tables</span>
+      <div class="fi-dim" style="padding-left:14px">只用了生成器选定的表：order_items、products</div></div></div><div class="fi"><div class="fi-line">✓ <b>表和字段必须能在系统目录里对上（按表信息核对）</b>
+      <span class="fi-dim">rt-catalog</span>
+      <div class="fi-dim" style="padding-left:14px">SQL 里没有目录中的表，字段核对跳过</div></div></div><div class="fi"><div class="fi-line">✓ <b>校验阶段不访问数据库</b>
+      <span class="fi-dim">rt-no-db</span>
+      <div class="fi-dim" style="padding-left:14px">表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句</div></div></div><div class="fi"><div class="fi-line">✓ <b>表名是否在授权范围内</b>
+      <span class="fi-dim">ck-1</span>
+      <div class="fi-dim" style="padding-left:14px">只使用 products 表，属于生成器选定表（order_items、products）</div></div></div><div class="fi"><div class="fi-line">✓ <b>字段是否存在（products.id / products.stock / products.name）</b>
+      <span class="fi-dim">ck-2</span>
+      <div class="fi-dim" style="padding-left:14px">products 表含 id INT PK、name TEXT、stock INT，字段均对得上</div></div></div><div class="fi"><div class="fi-line">✓ <b>WHERE 条件是否覆盖任务限定（ID 为 2、4、6、7、8、10 这 6 个商品）</b>
+      <span class="fi-dim">ck-3</span>
+      <div class="fi-dim" style="padding-left:14px">id IN (2,4,6,7,8,10) 精确覆盖 6 个目标商品，无遗漏无多余</div></div></div><div class="fi"><div class="fi-line">✓ <b>SET 值是否符合任务要求（库存统一更新为 15）</b>
+      <span class="fi-dim">ck-4</span>
+      <div class="fi-dim" style="padding-left:14px">SET stock = 15 与任务要求一致</div></div></div><div class="fi"><div class="fi-line">✓ <b>语句是否为单条、无分号、无注释</b>
+      <span class="fi-dim">ck-5</span>
+      <div class="fi-dim" style="padding-left:14px">单条 UPDATE 语句，无分号结尾、无注释、无多语句</div></div></div><div class="fi"><div class="fi-line">✓ <b>RETURNING 子句是否合法且不越权</b>
+      <span class="fi-dim">ck-6</span>
+      <div class="fi-dim" style="padding-left:14px">RETURNING id, name, stock 均为 products 表字段，用于回显被修改数据，合法</div></div></div><div class="fi"><div class="fi-line">✓ <b>是否满足任务中“根据被修改的数据查询有多少人购买”的后续需求</b>
+      <span class="fi-dim">ck-7</span>
+      <div class="fi-dim" style="padding-left:14px">本任务仅要求执行库存更新（修改），RETURNING 已回显被改商品 ID，可供后续 JOIN order_items 统计购买人数；本步不越权做统计</div></div></div><div class="fi"><div class="fi-line">校验结论：<b>通过</b>
+      
+      <div class="fi-dim" style="padding-left:14px">SQL 为单条 UPDATE，仅涉及授权表 products，字段 id/name/stock 与目录一致；WHERE id IN (2,4,6,7,8,10) 精确覆盖任务指定的 6 个商品，SET stock = 15 与要求一致；RETURNING 回显被修改行，便于后续按被改商品统计购买人数。运行时确定性检查全部 pass，无更严格项被违反，故通过。</div></div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">7 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">attempts · checks · history · last_agent · next_agent · status · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-7" open>
+        <summary>真实传递过去的内容 · 完整结构（14 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#377</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;静态防线（危险语句 / 多语句 / 表名授权）&quot;,
+  &quot;detail&quot;: &quot;UPDATE · 风险 写入&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-static&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#378</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;SQL 涉及的表必须在生成器选定的表之内&quot;,
+  &quot;detail&quot;: &quot;只用了生成器选定的表：order_items、products&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-intent-tables&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#379</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;表和字段必须能在系统目录里对上（按表信息核对）&quot;,
+  &quot;detail&quot;: &quot;SQL 里没有目录中的表，字段核对跳过&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-catalog&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#380</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;校验阶段不访问数据库&quot;,
+  &quot;detail&quot;: &quot;表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-no-db&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#381</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;表名是否在授权范围内&quot;,
+  &quot;detail&quot;: &quot;只使用 products 表，属于生成器选定表（order_items、products）&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-1&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#382</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;字段是否存在（products.id / products.stock / products.name）&quot;,
+  &quot;detail&quot;: &quot;products 表含 id INT PK、name TEXT、stock INT，字段均对得上&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-2&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#383</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;WHERE 条件是否覆盖任务限定（ID 为 2、4、6、7、8、10 这 6 个商品）&quot;,
+  &quot;detail&quot;: &quot;id IN (2,4,6,7,8,10) 精确覆盖 6 个目标商品，无遗漏无多余&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-3&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#384</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;SET 值是否符合任务要求（库存统一更新为 15）&quot;,
+  &quot;detail&quot;: &quot;SET stock = 15 与任务要求一致&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-4&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#385</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;语句是否为单条、无分号、无注释&quot;,
+  &quot;detail&quot;: &quot;单条 UPDATE 语句，无分号结尾、无注释、无多语句&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-5&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#386</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;RETURNING 子句是否合法且不越权&quot;,
+  &quot;detail&quot;: &quot;RETURNING id, name, stock 均为 products 表字段，用于回显被修改数据，合法&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-6&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#387</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;是否满足任务中“根据被修改的数据查询有多少人购买”的后续需求&quot;,
+  &quot;detail&quot;: &quot;本任务仅要求执行库存更新（修改），RETURNING 已回显被改商品 ID，可供后续 JOIN order_items 统计购买人数；本步不越权做统计&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-7&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#388</span>
+            <b>verdict</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;passed&quot;: true,
+  &quot;reason&quot;: &quot;SQL 为单条 UPDATE，仅涉及授权表 products，字段 id/name/stock 与目录一致；WHERE id IN (2,4,6,7,8,10) 精确覆盖任务指定的 6 个商品，SET stock = 15 与要求一致；RETURNING 回显被修改行，便于后续按被改商品统计购买人数。运行时确定性检查全部 pass，无更严格项被违反，故通过。&quot;,
+  &quot;static&quot;: &quot;UPDATE · 风险 写入&quot;,
+  &quot;forced_by_runtime&quot;: false
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#390</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=validator · round=0 · version=6</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;attempts&quot;,
+    &quot;checks&quot;,
+    &quot;history&quot;,
+    &quot;last_agent&quot;,
+    &quot;next_agent&quot;,
+    &quot;status&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;checks&quot;: {
+      &quot;checks&quot;: [
+        {
+          &quot;item&quot;: &quot;静态防线（危险语句 / 多语句 / 表名授权）&quot;,
+          &quot;detail&quot;: &quot;UPDATE · 风险 写入&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-static&quot;
+        },
+        {
+          &quot;item&quot;: &quot;SQL 涉及的表必须在生成器选定的表之内&quot;,
+          &quot;detail&quot;: &quot;只用了生成器选定的表：order_items、products&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-intent-tables&quot;
+        },
+        {
+          &quot;item&quot;: &quot;表和字段必须能在系统目录里对上（按表信息核对）&quot;,
+          &quot;detail&quot;: &quot;SQL 里没有目录中的表，字段核对跳过&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-catalog&quot;
+        },
+        {
+          &quot;item&quot;: &quot;校验阶段不访问数据库&quot;,
+          &quot;detail&quot;: &quot;表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-no-db&quot;
+        },
+        {
+          &quot;item&quot;: &quot;表名是否在授权范围内&quot;,
+          &quot;detail&quot;: &quot;只使用 products 表，属于生成器选定表（order_items、products）&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-1&quot;
+        },
+        {
+          &quot;item&quot;: &quot;字段是否存在（products.id / products.stock / products.name）&quot;,
+          &quot;detail&quot;: &quot;products 表含 id INT PK、name TEXT、stock INT，字段均对得上&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-2&quot;
+        },
+        {
+          &quot;item&quot;: &quot;WHERE 条件是否覆盖任务限定（ID 为 2、4、6、7、8、10 这 6 个商品）&quot;,
+          &quot;detail&quot;: &quot;id IN (2,4,6,7,8,10) 精确覆盖 6 个目标商品，无遗漏无多余&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-3&quot;
+        },
+        {
+          &quot;item&quot;: &quot;SET 值是否符合任务要求（库存统一更新为 15）&quot;,
+          &quot;detail&quot;: &quot;SET stock = 15 与任务要求一致&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-4&quot;
+        },
+        {
+          &quot;item&quot;: &quot;语句是否为单条、无分号、无注释&quot;,
+          &quot;detail&quot;: &quot;单条 UPDATE 语句，无分号结尾、无注释、无多语句&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-5&quot;
+        },
+        {
+          &quot;item&quot;: &quot;RETURNING 子句是否合法且不越权&quot;,
+          &quot;detail&quot;: &quot;RETURNING id, name, stock 均为 products 表字段，用于回显被修改数据，合法&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-6&quot;
+        },
+        {
+          &quot;item&quot;: &quot;是否满足任务中“根据被修改的数据查询有多少人购买”的后续需求&quot;,
+          &quot;detail&quot;: &quot;本任务仅要求执行库存更新（修改），RETURNING 已回显被改商品 ID，可供后续 JOIN order_items 统计购买人数；本步不越权做统计&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-7&quot;
+        }
+      ],
+      &quot;passed&quot;: true,
+      &quot;reason&quot;: &quot;SQL 为单条 UPDATE，仅涉及授权表 products，字段 id/name/stock 与目录一致；WHERE id IN (2,4,6,7,8,10) 精确覆盖任务指定的 6 个商品，SET stock = 15 与要求一致；RETURNING 回显被修改行，便于后续按被改商品统计购买人数。运行时确定性检查全部 pass，无更严格项被违反，故通过。&quot;,
+      &quot;forced_by_runtime&quot;: false
+    },
+    &quot;status&quot;: &quot;validating&quot;,
+    &quot;history&quot;: [
+      {
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;duration_ms&quot;: 3,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      },
+      {
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;kind&quot;: null,
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;UPDATE&quot;,
+        &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;exec_ok&quot;: null,
+        &quot;executed&quot;: false,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;写入&quot;,
+        &quot;sub_task_id&quot;: &quot;st-2&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: null,
+        &quot;validated_passed&quot;: true
+      }
+    ],
+    &quot;version&quot;: 7,
+    &quot;attempts&quot;: [
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      },
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      }
+    ],
+    &quot;last_agent&quot;: &quot;validator&quot;,
+    &quot;next_agent&quot;: &quot;executor&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#391</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=7</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;executor&quot;,
+  &quot;from&quot;: &quot;validator&quot;,
+  &quot;reason&quot;: &quot;校验通过，可以执行&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;executor&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ovr">
+      <div class="hop-hd">
+        <span class="hop-n">8</span>
+        <span class="face" style="background:var(--executor)">执</span><span>SQL 执行</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--planner)">规</span><span><b>规划器</b></span>
+        <span class="badge ovr">
+          护栏改道</span>
+      </div>
+      <div class="hop-bd"><div class="ovr-box">
+        模型建议交给 <span class="strike">结束</span>
+        　→　护栏改去 <b>规划器</b>
+        <div class="fi-dim">理由：子任务 st-2 已执行完成，回到规划器复查剩余 1 个任务是否仍成立</div></div><div class="fi"><div class="fi-k">产出 · <b>执行结果</b></div>
+      <div class="fi-line">✓ 成功 · 影响/返回 <b>6</b> 行
+        <span class="fi-dim">8ms</span></div>
+      </div><div class="fi"><div class="fi-k">产出 · <b>🧠 共享记忆</b>
+        <span class="delta-tag">agent_memory</span>
+        <span class="fi-dim">只有执行器真跑过的才算事实</span></div>
+      <div class="fi-line">把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数 —— 成功将 id 为 2、4、6、7、8、10 的 6 个商品库存更新为 15，受影响行数为 6，与预期一致。</div>
+      <div class="fi-line fi-dim">来源 sql_id=30 · 6 行
+        · 已核对</div><div class="fi-line fi-dim">可复用实体：products.id = 2、4、6、7、8、10</div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">11 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">attempts · confirmed · cursor · explain · history · last_agent · memory · next_agent · result · status · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-8" open>
+        <summary>真实传递过去的内容 · 完整结构（4 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#393</span>
+            <b>result</b>
+            <span class="fi-dim">role=executor · round=0 · version=7</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;ok&quot;: true,
+  &quot;kind&quot;: &quot;rows&quot;,
+  &quot;rows&quot;: [
+    [
+      2,
+      &quot;无线鼠标 M3&quot;,
+      15
+    ],
+    [
+      4,
+      &quot;USB-C 扩展坞&quot;,
+      15
+    ],
+    [
+      6,
+      &quot;降噪耳机 Air&quot;,
+      15
+    ],
+    [
+      7,
+      &quot;移动硬盘 1T&quot;,
+      15
+    ],
+    [
+      8,
+      &quot;机械臂显示器架&quot;,
+      15
+    ],
+    [
+      10,
+      &quot;4K 摄像头&quot;,
+      15
+    ]
+  ],
+  &quot;columns&quot;: [
+    &quot;id&quot;,
+    &quot;name&quot;,
+    &quot;stock&quot;
+  ],
+  &quot;rowcount&quot;: 6,
+  &quot;truncated&quot;: false,
+  &quot;duration_ms&quot;: 8
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#395</span>
+            <b>memory</b>
+            <span class="fi-dim">role=executor · round=0 · version=7</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;claim&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数 —— 成功将 id 为 2、4、6、7、8、10 的 6 个商品库存更新为 15，受影响行数为 6，与预期一致。&quot;,
+  &quot;saved&quot;: &quot;st-2&quot;,
+  &quot;sql_id&quot;: 30,
+  &quot;entities&quot;: {
+    &quot;key&quot;: &quot;id&quot;,
+    &quot;table&quot;: &quot;products&quot;,
+    &quot;values&quot;: [
+      2,
+      4,
+      6,
+      7,
+      8,
+      10
+    ]
+  },
+  &quot;rowcount&quot;: 6,
+  &quot;verified&quot;: true
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#397</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=executor · round=0 · version=7</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;attempts&quot;,
+    &quot;confirmed&quot;,
+    &quot;cursor&quot;,
+    &quot;explain&quot;,
+    &quot;history&quot;,
+    &quot;last_agent&quot;,
+    &quot;memory&quot;,
+    &quot;next_agent&quot;,
+    &quot;result&quot;,
+    &quot;status&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;cursor&quot;: 2,
+    &quot;memory&quot;: [
+      {
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;claim&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存 —— 查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。&quot;,
+        &quot;round&quot;: 0,
+        &quot;stage&quot;: &quot;executed&quot;,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;mem_id&quot;: 9,
+        &quot;sql_id&quot;: 27,
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;entities&quot;: {
+          &quot;key&quot;: &quot;id&quot;,
+          &quot;table&quot;: &quot;products&quot;,
+          &quot;values&quot;: [
+            2,
+            4,
+            6,
+            7,
+            8,
+            10
+          ]
+        },
+        &quot;rowcount&quot;: 6,
+        &quot;sql_text&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;verified&quot;: true,
+        &quot;created_at&quot;: &quot;2026-09-16T10:25:17.660399+00:00&quot;,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;global_task_id&quot;: &quot;180f196f-88e1-4751-8e2a-5c4fc3b61d83&quot;
+      },
+      {
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            15
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            15
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            15
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            15
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            15
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            15
+          ]
+        ],
+        &quot;claim&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数 —— 成功将 id 为 2、4、6、7、8、10 的 6 个商品库存更新为 15，受影响行数为 6，与预期一致。&quot;,
+        &quot;round&quot;: 0,
+        &quot;stage&quot;: &quot;executed&quot;,
+        &quot;action&quot;: &quot;UPDATE&quot;,
+        &quot;mem_id&quot;: 10,
+        &quot;sql_id&quot;: 30,
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;entities&quot;: {
+          &quot;key&quot;: &quot;id&quot;,
+          &quot;table&quot;: &quot;products&quot;,
+          &quot;values&quot;: [
+            2,
+            4,
+            6,
+            7,
+            8,
+            10
+          ]
+        },
+        &quot;rowcount&quot;: 6,
+        &quot;sql_text&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;verified&quot;: true,
+        &quot;created_at&quot;: &quot;2026-09-16T10:25:27.779298+00:00&quot;,
+        &quot;sub_task_id&quot;: &quot;st-2&quot;,
+        &quot;global_task_id&quot;: &quot;180f196f-88e1-4751-8e2a-5c4fc3b61d83&quot;
+      }
+    ],
+    &quot;result&quot;: {
+      &quot;ok&quot;: true,
+      &quot;kind&quot;: &quot;rows&quot;,
+      &quot;rows&quot;: [
+        [
+          2,
+          &quot;无线鼠标 M3&quot;,
+          15
+        ],
+        [
+          4,
+          &quot;USB-C 扩展坞&quot;,
+          15
+        ],
+        [
+          6,
+          &quot;降噪耳机 Air&quot;,
+          15
+        ],
+        [
+          7,
+          &quot;移动硬盘 1T&quot;,
+          15
+        ],
+        [
+          8,
+          &quot;机械臂显示器架&quot;,
+          15
+        ],
+        [
+          10,
+          &quot;4K 摄像头&quot;,
+          15
+        ]
+      ],
+      &quot;columns&quot;: [
+        &quot;id&quot;,
+        &quot;name&quot;,
+        &quot;stock&quot;
+      ],
+      &quot;rowcount&quot;: 6,
+      &quot;truncated&quot;: false,
+      &quot;error_hint&quot;: &quot;&quot;,
+      &quot;duration_ms&quot;: 8,
+      &quot;model_summary&quot;: &quot;成功将 id 为 2、4、6、7、8、10 的 6 个商品库存更新为 15，受影响行数为 6，与预期一致。&quot;
+    },
+    &quot;status&quot;: &quot;executing&quot;,
+    &quot;explain&quot;: {
+      &quot;ok&quot;: true,
+      &quot;plan&quot;: [
+        {
+          &quot;Plan&quot;: {
+            &quot;Alias&quot;: &quot;products&quot;,
+            &quot;Plans&quot;: [
+              {
+                &quot;Alias&quot;: &quot;products&quot;,
+                &quot;Plans&quot;: [
+                  {
+                    &quot;Disabled&quot;: false,
+                    &quot;Node Type&quot;: &quot;Bitmap Index Scan&quot;,
+                    &quot;Plan Rows&quot;: 6,
+                    &quot;Index Cond&quot;: &quot;(id = ANY ('{2,4,6,7,8,10}'::integer[]))&quot;,
+                    &quot;Index Name&quot;: &quot;products_pkey&quot;,
+                    &quot;Plan Width&quot;: 0,
+                    &quot;Total Cost&quot;: 4.2,
+                    &quot;Startup Cost&quot;: 0,
+                    &quot;Async Capable&quot;: false,
+                    &quot;Parallel Aware&quot;: false,
+                    &quot;Parent Relationship&quot;: &quot;Outer&quot;
+                  }
+                ],
+                &quot;Disabled&quot;: false,
+                &quot;Node Type&quot;: &quot;Bitmap Heap Scan&quot;,
+                &quot;Plan Rows&quot;: 6,
+                &quot;Plan Width&quot;: 10,
+                &quot;Total Cost&quot;: 13.69,
+                &quot;Recheck Cond&quot;: &quot;(id = ANY ('{2,4,6,7,8,10}'::integer[]))&quot;,
+                &quot;Startup Cost&quot;: 4.2,
+                &quot;Async Capable&quot;: false,
+                &quot;Relation Name&quot;: &quot;products&quot;,
+                &quot;Parallel Aware&quot;: false,
+                &quot;Parent Relationship&quot;: &quot;Outer&quot;
+              }
+            ],
+            &quot;Disabled&quot;: false,
+            &quot;Node Type&quot;: &quot;ModifyTable&quot;,
+            &quot;Operation&quot;: &quot;Update&quot;,
+            &quot;Plan Rows&quot;: 6,
+            &quot;Plan Width&quot;: 10,
+            &quot;Total Cost&quot;: 13.69,
+            &quot;Startup Cost&quot;: 4.2,
+            &quot;Async Capable&quot;: false,
+            &quot;Relation Name&quot;: &quot;products&quot;,
+            &quot;Parallel Aware&quot;: false
+          }
+        }
+      ],
+      &quot;est_rows&quot;: 6,
+      &quot;node_type&quot;: &quot;ModifyTable&quot;
+    },
+    &quot;history&quot;: [
+      {
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;duration_ms&quot;: 3,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      },
+      {
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            15
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            15
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            15
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            15
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            15
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            15
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;UPDATE&quot;,
+        &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;写入&quot;,
+        &quot;duration_ms&quot;: 8,
+        &quot;sub_task_id&quot;: &quot;st-2&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      }
+    ],
+    &quot;version&quot;: 8,
+    &quot;attempts&quot;: [
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      },
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      }
+    ],
+    &quot;confirmed&quot;: false,
+    &quot;last_agent&quot;: &quot;executor&quot;,
+    &quot;next_agent&quot;: &quot;done&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#398</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=8</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;planner&quot;,
+  &quot;from&quot;: &quot;executor&quot;,
+  &quot;reason&quot;: &quot;子任务 st-2 已执行完成，回到规划器复查剩余 1 个任务是否仍成立&quot;,
+  &quot;overridden&quot;: true,
+  &quot;model_wanted&quot;: &quot;done&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">9</span>
+        <span class="face" style="background:var(--planner)">规</span><span>规划器</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--generator)">生</span><span><b>SQL 生成</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 生成，护栏在允许范围内采纳</div><div class="fi"><div class="fi-k">产出 · <b>🔁 规划器复查</b> <span class="fi-dim">剩余计划不变，继续做</span></div><div class="fi-line">复查结论：前两步实际结果与计划前提一致：库存&lt;6 的商品确为 6 个（ID 2、4、6、7、8、10），且已全部更新为 15，受影响行数 6 与预期吻合。st-3 依赖 st-1 的商品集合，该集合已具体化为 6 个 ID，任务描述中已写明，无需改写。剩余计划成立，继续执行 st-3 统计这 6 个商品各自的购买人数。</div><div class="fi-line">✓ <b>st-1</b> [查询] 查询库存小于 6 的商品（含商品标识与当前库存） <span class="fi-dim">· 完成标准：返回库存&lt;6 的商品清单，含商品 ID 与当前库存</span></div><div class="fi-line">✓ <b>st-2</b> [修改] 把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15 <span class="fi-dim">依赖 st-1</span> <span class="fi-dim">· 完成标准：这 6 个商品的库存均被更新为 15，并返回受影响行数</span></div><div class="fi-line">· <b>st-3</b> [查询] 统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数） <span class="fi-dim">依赖 st-1</span> <span class="fi-dim">· 完成标准：返回这 6 个商品各自的购买人数</span></div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">13 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">chat_reply · cursor · intents · last_agent · mode · next_agent · plan_note · refusal · replanned_cursor · safety · status · understanding · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-9" open>
+        <summary>真实传递过去的内容 · 完整结构（3 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#401</span>
+            <b>plan</b>
+            <span class="fi-dim">role=planner · round=0 · version=8</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;mode&quot;: &quot;execute&quot;,
+  &quot;turn&quot;: 1,
+  &quot;phase&quot;: &quot;continue&quot;,
+  &quot;cursor&quot;: 2,
+  &quot;safety&quot;: &quot;安全：仅涉及查询与对指定商品的库存更新，无 DDL、无越权、无删表等危险操作。&quot;,
+  &quot;dropped&quot;: [],
+  &quot;intents&quot;: [
+    {
+      &quot;kind&quot;: &quot;查询&quot;,
+      &quot;intent&quot;: &quot;查询库存小于 6 的商品（含商品标识与当前库存）&quot;,
+      &quot;acceptance&quot;: &quot;返回库存&lt;6 的商品清单，含商品 ID 与当前库存&quot;,
+      &quot;depends_on&quot;: [],
+      &quot;sub_task_id&quot;: &quot;st-1&quot;
+    },
+    {
+      &quot;kind&quot;: &quot;修改&quot;,
+      &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15&quot;,
+      &quot;acceptance&quot;: &quot;这 6 个商品的库存均被更新为 15，并返回受影响行数&quot;,
+      &quot;depends_on&quot;: [
+        &quot;st-1&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-2&quot;
+    },
+    {
+      &quot;kind&quot;: &quot;查询&quot;,
+      &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数）&quot;,
+      &quot;acceptance&quot;: &quot;返回这 6 个商品各自的购买人数&quot;,
+      &quot;depends_on&quot;: [
+        &quot;st-1&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-3&quot;
+    }
+  ],
+  &quot;refusal&quot;: null,
+  &quot;attempts&quot;: 1,
+  &quot;chat_reply&quot;: null,
+  &quot;plan_action&quot;: &quot;continue&quot;,
+  &quot;plan_reason&quot;: &quot;st-1 已确认库存&lt;6的商品为 ID 2、4、6、7、8、10；st-2 已把这 6 个商品库存更新为 15（影响 6 行）。st-3 的统计范围已由 st-1/st-2 的实际结果确定为这 6 个商品 ID，描述已足够明确，无需调整。&quot;,
+  &quot;review_note&quot;: &quot;前两步实际结果与计划前提一致：库存&lt;6 的商品确为 6 个（ID 2、4、6、7、8、10），且已全部更新为 15，受影响行数 6 与预期吻合。st-3 依赖 st-1 的商品集合，该集合已具体化为 6 个 ID，任务描述中已写明，无需改写。剩余计划成立，继续执行 st-3 统计这 6 个商品各自的购买人数。&quot;,
+  &quot;context_turns&quot;: [],
+  &quot;understanding&quot;: &quot;先查库存&lt;6的商品，把它们的库存补到15，再统计这些被修改商品各有多少人购买。&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#403</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=planner · round=0 · version=8</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;chat_reply&quot;,
+    &quot;cursor&quot;,
+    &quot;intents&quot;,
+    &quot;last_agent&quot;,
+    &quot;mode&quot;,
+    &quot;next_agent&quot;,
+    &quot;plan_note&quot;,
+    &quot;refusal&quot;,
+    &quot;replanned_cursor&quot;,
+    &quot;safety&quot;,
+    &quot;status&quot;,
+    &quot;understanding&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;mode&quot;: &quot;execute&quot;,
+    &quot;cursor&quot;: 2,
+    &quot;safety&quot;: &quot;安全：仅涉及查询与对指定商品的库存更新，无 DDL、无越权、无删表等危险操作。&quot;,
+    &quot;status&quot;: &quot;planning&quot;,
+    &quot;intents&quot;: [
+      {
+        &quot;kind&quot;: &quot;查询&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品（含商品标识与当前库存）&quot;,
+        &quot;acceptance&quot;: &quot;返回库存&lt;6 的商品清单，含商品 ID 与当前库存&quot;,
+        &quot;depends_on&quot;: [],
+        &quot;sub_task_id&quot;: &quot;st-1&quot;
+      },
+      {
+        &quot;kind&quot;: &quot;修改&quot;,
+        &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15&quot;,
+        &quot;acceptance&quot;: &quot;这 6 个商品的库存均被更新为 15，并返回受影响行数&quot;,
+        &quot;depends_on&quot;: [
+          &quot;st-1&quot;
+        ],
+        &quot;sub_task_id&quot;: &quot;st-2&quot;
+      },
+      {
+        &quot;kind&quot;: &quot;查询&quot;,
+        &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数）&quot;,
+        &quot;acceptance&quot;: &quot;返回这 6 个商品各自的购买人数&quot;,
+        &quot;depends_on&quot;: [
+          &quot;st-1&quot;
+        ],
+        &quot;sub_task_id&quot;: &quot;st-3&quot;
+      }
+    ],
+    &quot;refusal&quot;: &quot;&quot;,
+    &quot;version&quot;: 9,
+    &quot;plan_note&quot;: &quot;复查（已完成 2 个）：前两步实际结果与计划前提一致：库存&lt;6 的商品确为 6 个（ID 2、4、6、7、8、10），且已全部更新为 15，受影响行数 6 与预期吻合。st-3 依赖 st-1 的商品集合，该集合已具体化为 6 个 ID，任务描述中已写明，无需改写。剩余计划成立，继续执行 st-3 统计这 6 个商品各自的购买人数。&quot;,
+    &quot;chat_reply&quot;: &quot;&quot;,
+    &quot;last_agent&quot;: &quot;planner&quot;,
+    &quot;next_agent&quot;: &quot;generator&quot;,
+    &quot;understanding&quot;: &quot;先查库存&lt;6的商品，把它们的库存补到15，再统计这些被修改商品各有多少人购买。&quot;,
+    &quot;replanned_cursor&quot;: 2
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#404</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=9</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;generator&quot;,
+  &quot;from&quot;: &quot;planner&quot;,
+  &quot;reason&quot;: &quot;子任务 st-2 已完成，接着为 st-3 生成 SQL&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;generator&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">10</span>
+        <span class="face" style="background:var(--generator)">生</span><span>SQL 生成</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--validator)">校</span><span><b>SQL 校验</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 校验，护栏在允许范围内采纳</div><div class="fi"><div class="fi-k">产出 · <b>第一层选表</b>（只看表简述与关系）</div>
+      <div class="fi-line">选中：<b>customers、order_items、orders、products</b></div>
+      <div class="fi-line fi-dim">依据：任务要求统计指定商品（ID 2、4、6、7、8、10）各自的购买人数。购买人数需要从订单明细 order_items 中按 product_id 聚合，并关联 orders 主表以确定订单归属（去重统计下单客户数，需 orders.customer_id）。products 表用于校验/关联商品信息（商品 ID 与名称），虽核心聚合在 order_items，但为完整性与可能的商品维度过滤一并选上。customers 表在仅统计人数时非必需，但若需按客户去重口径确认，orders.customer_id 已足够，故未选 customers。</div>
+      <div class="fi-line fi-dim">候选池：customers、order_items、orders、products</div></div><div class="fi"><div class="fi-k">产出 · <b>SQL</b>
+        <span class="risk r-只读">只读</span>
+        <span class="fi-dim">SELECT</span></div>
+      
+      <pre class="fi-pre">SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100</pre>
+      <div class="fi-line fi-dim">商品 ID 列表直接取自 st-1 已确认事实（2、4、6、7、8、10），不另设代理条件。购买人数口径：以 orders.customer_id 去重计数（COUNT(DISTINCT o.customer_id)），因为一个客户可能对同一商品下多张订单/多条明细，去重才等于“人数”。JOIN 链路：products.id = order_items.product_id 取到该商品的明细，再 order_items.order_id = orders.id 取到下单客户；orders 的 JOIN 条件里加 status &lt;&gt; '已取消' 排除已取消订单（取消订单不应计入购买）。用 LEFT JOIN 保证即使某商品无人购买也返回该商品行（计数为 0），满足“这 6 个商品各自”的完整性。GROUP BY p.id, p.name 按商品聚合，ORDER BY p.id 便于核对，LIMIT 100 兜底。</div>
+      
+      </div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">9 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">checks · confirmed · draft · last_agent · next_agent · result · status · verdict · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-10" open>
+        <summary>真实传递过去的内容 · 完整结构（4 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#407</span>
+            <b>tables</b>
+            <span class="fi-dim">role=generator · round=0 · version=9</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;reason&quot;: &quot;任务要求统计指定商品（ID 2、4、6、7、8、10）各自的购买人数。购买人数需要从订单明细 order_items 中按 product_id 聚合，并关联 orders 主表以确定订单归属（去重统计下单客户数，需 orders.customer_id）。products 表用于校验/关联商品信息（商品 ID 与名称），虽核心聚合在 order_items，但为完整性与可能的商品维度过滤一并选上。customers 表在仅统计人数时非必需，但若需按客户去重口径确认，orders.customer_id 已足够，故未选 customers。&quot;,
+  &quot;selected&quot;: [
+    &quot;customers&quot;,
+    &quot;order_items&quot;,
+    &quot;orders&quot;,
+    &quot;products&quot;
+  ],
+  &quot;candidates&quot;: [
+    &quot;customers&quot;,
+    &quot;order_items&quot;,
+    &quot;orders&quot;,
+    &quot;products&quot;
+  ]
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#409</span>
+            <b>sql</b>
+            <span class="fi-dim">role=generator · round=0 · version=9</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;draft&quot;: {
+    &quot;sql&quot;: &quot;SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100&quot;,
+    &quot;note&quot;: &quot;商品 ID 列表直接取自 st-1 已确认事实（2、4、6、7、8、10），不另设代理条件。购买人数口径：以 orders.customer_id 去重计数（COUNT(DISTINCT o.customer_id)），因为一个客户可能对同一商品下多张订单/多条明细，去重才等于“人数”。JOIN 链路：products.id = order_items.product_id 取到该商品的明细，再 order_items.order_id = orders.id 取到下单客户；orders 的 JOIN 条件里加 status &lt;&gt; '已取消' 排除已取消订单（取消订单不应计入购买）。用 LEFT JOIN 保证即使某商品无人购买也返回该商品行（计数为 0），满足“这 6 个商品各自”的完整性。GROUP BY p.id, p.name 按商品聚合，ORDER BY p.id 便于核对，LIMIT 100 兜底。&quot;,
+    &quot;round&quot;: 0,
+    &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数）&quot;,
+    &quot;tables&quot;: [
+      &quot;customers&quot;,
+      &quot;order_items&quot;,
+      &quot;orders&quot;,
+      &quot;products&quot;
+    ],
+    &quot;sub_task_id&quot;: &quot;st-3&quot;
+  },
+  &quot;stage&quot;: &quot;generated&quot;,
+  &quot;verdict&quot;: {
+    &quot;level&quot;: &quot;只读&quot;,
+    &quot;notes&quot;: [],
+    &quot;action&quot;: &quot;SELECT&quot;,
+    &quot;tables&quot;: [
+      &quot;products&quot;,
+      &quot;order_items&quot;,
+      &quot;orders&quot;
+    ],
+    &quot;reasons&quot;: [],
+    &quot;statements&quot;: 1,
+    &quot;needs_confirm&quot;: false
+  },
+  &quot;attempts&quot;: 1
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#411</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=generator · round=0 · version=9</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;checks&quot;,
+    &quot;confirmed&quot;,
+    &quot;draft&quot;,
+    &quot;last_agent&quot;,
+    &quot;next_agent&quot;,
+    &quot;result&quot;,
+    &quot;status&quot;,
+    &quot;verdict&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;draft&quot;: {
+      &quot;sql&quot;: &quot;SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100&quot;,
+      &quot;note&quot;: &quot;商品 ID 列表直接取自 st-1 已确认事实（2、4、6、7、8、10），不另设代理条件。购买人数口径：以 orders.customer_id 去重计数（COUNT(DISTINCT o.customer_id)），因为一个客户可能对同一商品下多张订单/多条明细，去重才等于“人数”。JOIN 链路：products.id = order_items.product_id 取到该商品的明细，再 order_items.order_id = orders.id 取到下单客户；orders 的 JOIN 条件里加 status &lt;&gt; '已取消' 排除已取消订单（取消订单不应计入购买）。用 LEFT JOIN 保证即使某商品无人购买也返回该商品行（计数为 0），满足“这 6 个商品各自”的完整性。GROUP BY p.id, p.name 按商品聚合，ORDER BY p.id 便于核对，LIMIT 100 兜底。&quot;,
+      &quot;round&quot;: 0,
+      &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数）&quot;,
+      &quot;tables&quot;: [
+        &quot;customers&quot;,
+        &quot;order_items&quot;,
+        &quot;orders&quot;,
+        &quot;products&quot;
+      ],
+      &quot;sub_task_id&quot;: &quot;st-3&quot;
+    },
+    &quot;checks&quot;: null,
+    &quot;result&quot;: null,
+    &quot;status&quot;: &quot;generating&quot;,
+    &quot;verdict&quot;: {
+      &quot;level&quot;: &quot;只读&quot;,
+      &quot;notes&quot;: [],
+      &quot;action&quot;: &quot;SELECT&quot;,
+      &quot;tables&quot;: [
+        &quot;products&quot;,
+        &quot;order_items&quot;,
+        &quot;orders&quot;
+      ],
+      &quot;reasons&quot;: [],
+      &quot;statements&quot;: 1,
+      &quot;needs_confirm&quot;: false
+    },
+    &quot;version&quot;: 10,
+    &quot;confirmed&quot;: false,
+    &quot;last_agent&quot;: &quot;generator&quot;,
+    &quot;next_agent&quot;: &quot;validator&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#412</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;validator&quot;,
+  &quot;from&quot;: &quot;generator&quot;,
+  &quot;reason&quot;: &quot;SQL 必须经过校验才能执行&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;validator&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ">
+      <div class="hop-hd">
+        <span class="hop-n">11</span>
+        <span class="face" style="background:var(--validator)">校</span><span>SQL 校验</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--executor)">执</span><span><b>SQL 执行</b></span>
+        <span class="badge ok">
+          按模型的建议交接</span>
+      </div>
+      <div class="hop-bd"><div class="fi fi-dim">模型自己建议交给 SQL 执行，护栏在允许范围内采纳</div><div class="fi"><div class="fi-line">✓ <b>静态防线（危险语句 / 多语句 / 表名授权）</b>
+      <span class="fi-dim">rt-static</span>
+      <div class="fi-dim" style="padding-left:14px">SELECT · 风险 只读</div></div></div><div class="fi"><div class="fi-line">✓ <b>SQL 涉及的表必须在生成器选定的表之内</b>
+      <span class="fi-dim">rt-intent-tables</span>
+      <div class="fi-dim" style="padding-left:14px">只用了生成器选定的表：customers、order_items、orders、products</div></div></div><div class="fi"><div class="fi-line">✓ <b>表和字段必须能在系统目录里对上（按表信息核对）</b>
+      <span class="fi-dim">rt-catalog</span>
+      <div class="fi-dim" style="padding-left:14px">表和字段都能在系统目录里对上（3 张表）</div></div></div><div class="fi"><div class="fi-line">✓ <b>校验阶段不访问数据库</b>
+      <span class="fi-dim">rt-no-db</span>
+      <div class="fi-dim" style="padding-left:14px">表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句</div></div></div><div class="fi"><div class="fi-line">✓ <b>语句类型与安全性（只读、单语句、无注释/分号）</b>
+      <span class="fi-dim">ck-1</span>
+      <div class="fi-dim" style="padding-left:14px">单条 SELECT，无多语句、无注释、无分号结尾</div></div></div><div class="fi"><div class="fi-line">✓ <b>表在授权范围内</b>
+      <span class="fi-dim">ck-2</span>
+      <div class="fi-dim" style="padding-left:14px">仅 products、order_items、orders，均在生成器选定表内</div></div></div><div class="fi"><div class="fi-line">✓ <b>字段存在性</b>
+      <span class="fi-dim">ck-3</span>
+      <div class="fi-dim" style="padding-left:14px">products.id/name、order_items.product_id/order_id、orders.id/customer_id/status 均在目录中</div></div></div><div class="fi"><div class="fi-line">✓ <b>JOIN 条件合理性</b>
+      <span class="fi-dim">ck-4</span>
+      <div class="fi-dim" style="padding-left:14px">oi.product_id = p.id 与 o.id = oi.order_id 均为正确外键链路；LEFT JOIN 保留零购买商品</div></div></div><div class="fi"><div class="fi-line">✓ <b>聚合与 GROUP BY 配套</b>
+      <span class="fi-dim">ck-5</span>
+      <div class="fi-dim" style="padding-left:14px">COUNT(DISTINCT o.customer_id) 为聚合，p.id、p.name 均在 GROUP BY 中</div></div></div><div class="fi"><div class="fi-line">✓ <b>WHERE 覆盖任务限定（6 个商品 ID）</b>
+      <span class="fi-dim">ck-6</span>
+      <div class="fi-dim" style="padding-left:14px">p.id IN (2,4,6,7,8,10) 精确覆盖</div></div></div><div class="fi"><div class="fi-line">✓ <b>购买人数口径正确（排除已取消订单）</b>
+      <span class="fi-dim">ck-7</span>
+      <div class="fi-dim" style="padding-left:14px">o.status &lt;&gt; '已取消' 置于 LEFT JOIN ON 中，被排除订单的 customer_id 为 NULL，不计入 COUNT(DISTINCT)，口径正确</div></div></div><div class="fi"><div class="fi-line">✓ <b>运行时确定性检查</b>
+      <span class="fi-dim">ck-8</span>
+      <div class="fi-dim" style="padding-left:14px">rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass</div></div></div><div class="fi"><div class="fi-line">校验结论：<b>通过</b>
+      
+      <div class="fi-dim" style="padding-left:14px">SQL 只读、单语句，仅使用授权表 products/order_items/orders。字段均存在：products.id/name、order_items.product_id/order_id、orders.id/customer_id/status。JOIN 链路合理：products → order_items(product_id) → orders(id)，用 LEFT JOIN 保证无购买记录的商品也出现（buyer_count=0）。COUNT(DISTINCT o.customer_id) 统计购买人数，符合&quot;多少人购买&quot;的口径；GROUP BY p.id, p.name 与 SELECT 中非聚合列配套。WHERE p.id IN (2,4,6,7,8,10) 精确覆盖任务限定的 6 个商品。已取消订单通过 o.status &lt;&gt; '已取消' 排除，但该条件写在 LEFT JOIN 的 ON 中，被排除的订单其 o.customer_id 为 NULL，不会被 COUNT(DISTINCT) 计入，语义正确。ORDER BY p.id ASC、LIMIT 100 不影响结果正确性。运行时四项检查全部 pass，无更严格的反例。</div></div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">7 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">attempts · checks · history · last_agent · next_agent · status · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-11" open>
+        <summary>真实传递过去的内容 · 完整结构（15 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#415</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;静态防线（危险语句 / 多语句 / 表名授权）&quot;,
+  &quot;detail&quot;: &quot;SELECT · 风险 只读&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-static&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#416</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;SQL 涉及的表必须在生成器选定的表之内&quot;,
+  &quot;detail&quot;: &quot;只用了生成器选定的表：customers、order_items、orders、products&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-intent-tables&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#417</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;表和字段必须能在系统目录里对上（按表信息核对）&quot;,
+  &quot;detail&quot;: &quot;表和字段都能在系统目录里对上（3 张表）&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-catalog&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#418</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;校验阶段不访问数据库&quot;,
+  &quot;detail&quot;: &quot;表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;rt-no-db&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#419</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;语句类型与安全性（只读、单语句、无注释/分号）&quot;,
+  &quot;detail&quot;: &quot;单条 SELECT，无多语句、无注释、无分号结尾&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-1&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#420</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;表在授权范围内&quot;,
+  &quot;detail&quot;: &quot;仅 products、order_items、orders，均在生成器选定表内&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-2&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#421</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;字段存在性&quot;,
+  &quot;detail&quot;: &quot;products.id/name、order_items.product_id/order_id、orders.id/customer_id/status 均在目录中&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-3&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#422</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;JOIN 条件合理性&quot;,
+  &quot;detail&quot;: &quot;oi.product_id = p.id 与 o.id = oi.order_id 均为正确外键链路；LEFT JOIN 保留零购买商品&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-4&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#423</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;聚合与 GROUP BY 配套&quot;,
+  &quot;detail&quot;: &quot;COUNT(DISTINCT o.customer_id) 为聚合，p.id、p.name 均在 GROUP BY 中&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-5&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#424</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;WHERE 覆盖任务限定（6 个商品 ID）&quot;,
+  &quot;detail&quot;: &quot;p.id IN (2,4,6,7,8,10) 精确覆盖&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-6&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#425</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;购买人数口径正确（排除已取消订单）&quot;,
+  &quot;detail&quot;: &quot;o.status &lt;&gt; '已取消' 置于 LEFT JOIN ON 中，被排除订单的 customer_id 为 NULL，不计入 COUNT(DISTINCT)，口径正确&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-7&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#426</span>
+            <b>check</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;item&quot;: &quot;运行时确定性检查&quot;,
+  &quot;detail&quot;: &quot;rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass&quot;,
+  &quot;result&quot;: &quot;pass&quot;,
+  &quot;check_id&quot;: &quot;ck-8&quot;
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#427</span>
+            <b>verdict</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;passed&quot;: true,
+  &quot;reason&quot;: &quot;SQL 只读、单语句，仅使用授权表 products/order_items/orders。字段均存在：products.id/name、order_items.product_id/order_id、orders.id/customer_id/status。JOIN 链路合理：products → order_items(product_id) → orders(id)，用 LEFT JOIN 保证无购买记录的商品也出现（buyer_count=0）。COUNT(DISTINCT o.customer_id) 统计购买人数，符合\&quot;多少人购买\&quot;的口径；GROUP BY p.id, p.name 与 SELECT 中非聚合列配套。WHERE p.id IN (2,4,6,7,8,10) 精确覆盖任务限定的 6 个商品。已取消订单通过 o.status &lt;&gt; '已取消' 排除，但该条件写在 LEFT JOIN 的 ON 中，被排除的订单其 o.customer_id 为 NULL，不会被 COUNT(DISTINCT) 计入，语义正确。ORDER BY p.id ASC、LIMIT 100 不影响结果正确性。运行时四项检查全部 pass，无更严格的反例。&quot;,
+  &quot;static&quot;: &quot;SELECT · 风险 只读&quot;,
+  &quot;forced_by_runtime&quot;: false
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#429</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=validator · round=0 · version=10</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;attempts&quot;,
+    &quot;checks&quot;,
+    &quot;history&quot;,
+    &quot;last_agent&quot;,
+    &quot;next_agent&quot;,
+    &quot;status&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;checks&quot;: {
+      &quot;checks&quot;: [
+        {
+          &quot;item&quot;: &quot;静态防线（危险语句 / 多语句 / 表名授权）&quot;,
+          &quot;detail&quot;: &quot;SELECT · 风险 只读&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-static&quot;
+        },
+        {
+          &quot;item&quot;: &quot;SQL 涉及的表必须在生成器选定的表之内&quot;,
+          &quot;detail&quot;: &quot;只用了生成器选定的表：customers、order_items、orders、products&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-intent-tables&quot;
+        },
+        {
+          &quot;item&quot;: &quot;表和字段必须能在系统目录里对上（按表信息核对）&quot;,
+          &quot;detail&quot;: &quot;表和字段都能在系统目录里对上（3 张表）&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-catalog&quot;
+        },
+        {
+          &quot;item&quot;: &quot;校验阶段不访问数据库&quot;,
+          &quot;detail&quot;: &quot;表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;rt-no-db&quot;
+        },
+        {
+          &quot;item&quot;: &quot;语句类型与安全性（只读、单语句、无注释/分号）&quot;,
+          &quot;detail&quot;: &quot;单条 SELECT，无多语句、无注释、无分号结尾&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-1&quot;
+        },
+        {
+          &quot;item&quot;: &quot;表在授权范围内&quot;,
+          &quot;detail&quot;: &quot;仅 products、order_items、orders，均在生成器选定表内&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-2&quot;
+        },
+        {
+          &quot;item&quot;: &quot;字段存在性&quot;,
+          &quot;detail&quot;: &quot;products.id/name、order_items.product_id/order_id、orders.id/customer_id/status 均在目录中&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-3&quot;
+        },
+        {
+          &quot;item&quot;: &quot;JOIN 条件合理性&quot;,
+          &quot;detail&quot;: &quot;oi.product_id = p.id 与 o.id = oi.order_id 均为正确外键链路；LEFT JOIN 保留零购买商品&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-4&quot;
+        },
+        {
+          &quot;item&quot;: &quot;聚合与 GROUP BY 配套&quot;,
+          &quot;detail&quot;: &quot;COUNT(DISTINCT o.customer_id) 为聚合，p.id、p.name 均在 GROUP BY 中&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-5&quot;
+        },
+        {
+          &quot;item&quot;: &quot;WHERE 覆盖任务限定（6 个商品 ID）&quot;,
+          &quot;detail&quot;: &quot;p.id IN (2,4,6,7,8,10) 精确覆盖&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-6&quot;
+        },
+        {
+          &quot;item&quot;: &quot;购买人数口径正确（排除已取消订单）&quot;,
+          &quot;detail&quot;: &quot;o.status &lt;&gt; '已取消' 置于 LEFT JOIN ON 中，被排除订单的 customer_id 为 NULL，不计入 COUNT(DISTINCT)，口径正确&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-7&quot;
+        },
+        {
+          &quot;item&quot;: &quot;运行时确定性检查&quot;,
+          &quot;detail&quot;: &quot;rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass&quot;,
+          &quot;result&quot;: &quot;pass&quot;,
+          &quot;check_id&quot;: &quot;ck-8&quot;
+        }
+      ],
+      &quot;passed&quot;: true,
+      &quot;reason&quot;: &quot;SQL 只读、单语句，仅使用授权表 products/order_items/orders。字段均存在：products.id/name、order_items.product_id/order_id、orders.id/customer_id/status。JOIN 链路合理：products → order_items(product_id) → orders(id)，用 LEFT JOIN 保证无购买记录的商品也出现（buyer_count=0）。COUNT(DISTINCT o.customer_id) 统计购买人数，符合\&quot;多少人购买\&quot;的口径；GROUP BY p.id, p.name 与 SELECT 中非聚合列配套。WHERE p.id IN (2,4,6,7,8,10) 精确覆盖任务限定的 6 个商品。已取消订单通过 o.status &lt;&gt; '已取消' 排除，但该条件写在 LEFT JOIN 的 ON 中，被排除的订单其 o.customer_id 为 NULL，不会被 COUNT(DISTINCT) 计入，语义正确。ORDER BY p.id ASC、LIMIT 100 不影响结果正确性。运行时四项检查全部 pass，无更严格的反例。&quot;,
+      &quot;forced_by_runtime&quot;: false
+    },
+    &quot;status&quot;: &quot;validating&quot;,
+    &quot;history&quot;: [
+      {
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;duration_ms&quot;: 3,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      },
+      {
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            15
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            15
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            15
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            15
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            15
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            15
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;UPDATE&quot;,
+        &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;写入&quot;,
+        &quot;duration_ms&quot;: 8,
+        &quot;sub_task_id&quot;: &quot;st-2&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      },
+      {
+        &quot;sql&quot;: &quot;SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: null,
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数）&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;,
+          &quot;order_items&quot;,
+          &quot;orders&quot;
+        ],
+        &quot;exec_ok&quot;: null,
+        &quot;executed&quot;: false,
+        &quot;sql_hash&quot;: &quot;f8c2060bd43e9875&quot;,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;sub_task_id&quot;: &quot;st-3&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: null,
+        &quot;validated_passed&quot;: true
+      }
+    ],
+    &quot;version&quot;: 11,
+    &quot;attempts&quot;: [
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      },
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      },
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;f8c2060bd43e9875&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      }
+    ],
+    &quot;last_agent&quot;: &quot;validator&quot;,
+    &quot;next_agent&quot;: &quot;executor&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#430</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=11</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;executor&quot;,
+  &quot;from&quot;: &quot;validator&quot;,
+  &quot;reason&quot;: &quot;校验通过，可以执行&quot;,
+  &quot;overridden&quot;: false,
+  &quot;model_wanted&quot;: &quot;executor&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="hop ovr">
+      <div class="hop-hd">
+        <span class="hop-n">12</span>
+        <span class="face" style="background:var(--executor)">执</span><span>SQL 执行</span>
+        <span class="arrow">──▶</span>
+        <span class="face" style="background:var(--reviewer)">审</span><span><b>汇总审查</b></span>
+        <span class="badge ovr">
+          护栏改道</span>
+      </div>
+      <div class="hop-bd"><div class="ovr-box">
+        模型建议交给 <span class="strike">结束</span>
+        　→　护栏改去 <b>汇总审查</b>
+        <div class="fi-dim">理由：3 个子任务全部完成，进入汇总</div></div><div class="fi"><div class="fi-k">产出 · <b>执行结果</b></div>
+      <div class="fi-line">✓ 成功 · 影响/返回 <b>6</b> 行
+        <span class="fi-dim">4ms</span></div>
+      </div><div class="fi"><div class="fi-k">产出 · <b>🧠 共享记忆</b>
+        <span class="delta-tag">agent_memory</span>
+        <span class="fi-dim">只有执行器真跑过的才算事实</span></div>
+      <div class="fi-line">统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数） —— 查询成功，返回 6 个目标商品各自的去重购买人数（含 0 人商品），行数与商品数一致。</div>
+      <div class="fi-line fi-dim">来源 sql_id=33 · 6 行
+        · 已核对</div><div class="fi-line fi-dim">可复用实体：products.product_id = 2、4、6、7、8、10</div></div><div class="fi"><div class="fi-k">真实交出 · <b>状态增量</b>
+        <span class="delta-tag">state_delta</span>
+        <span class="fi-dim">11 个字段</span></div>
+      <div class="fi-line" style="font-size:11.5px;color:#334155;font-family:ui-monospace,Consolas,monospace">attempts · confirmed · cursor · explain · history · last_agent · memory · next_agent · result · status · version</div>
+      <div class="fi-dim">完整结构见下方「真实传递过去的内容」</div></div><details class="raw" data-fold="raw-12" open>
+        <summary>真实传递过去的内容 · 完整结构（4 条原始事件）</summary>
+        <div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#432</span>
+            <b>result</b>
+            <span class="fi-dim">role=executor · round=0 · version=11</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;ok&quot;: true,
+  &quot;kind&quot;: &quot;rows&quot;,
+  &quot;rows&quot;: [
+    [
+      2,
+      &quot;无线鼠标 M3&quot;,
+      2
+    ],
+    [
+      4,
+      &quot;USB-C 扩展坞&quot;,
+      0
+    ],
+    [
+      6,
+      &quot;降噪耳机 Air&quot;,
+      1
+    ],
+    [
+      7,
+      &quot;移动硬盘 1T&quot;,
+      1
+    ],
+    [
+      8,
+      &quot;机械臂显示器架&quot;,
+      1
+    ],
+    [
+      10,
+      &quot;4K 摄像头&quot;,
+      1
+    ]
+  ],
+  &quot;columns&quot;: [
+    &quot;product_id&quot;,
+    &quot;product_name&quot;,
+    &quot;buyer_count&quot;
+  ],
+  &quot;rowcount&quot;: 6,
+  &quot;truncated&quot;: false,
+  &quot;duration_ms&quot;: 4
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#434</span>
+            <b>memory</b>
+            <span class="fi-dim">role=executor · round=0 · version=11</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;claim&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数） —— 查询成功，返回 6 个目标商品各自的去重购买人数（含 0 人商品），行数与商品数一致。&quot;,
+  &quot;saved&quot;: &quot;st-3&quot;,
+  &quot;sql_id&quot;: 33,
+  &quot;entities&quot;: {
+    &quot;key&quot;: &quot;product_id&quot;,
+    &quot;table&quot;: &quot;products&quot;,
+    &quot;values&quot;: [
+      2,
+      4,
+      6,
+      7,
+      8,
+      10
+    ]
+  },
+  &quot;rowcount&quot;: 6,
+  &quot;verified&quot;: true
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#436</span>
+            <b>state_delta</b>
+            <span class="fi-dim">role=executor · round=0 · version=11</span>
+            <span class="delta-tag">节点返回值</span>
+          </div>
+          <pre class="raw-pre">{
+  &quot;keys&quot;: [
+    &quot;attempts&quot;,
+    &quot;confirmed&quot;,
+    &quot;cursor&quot;,
+    &quot;explain&quot;,
+    &quot;history&quot;,
+    &quot;last_agent&quot;,
+    &quot;memory&quot;,
+    &quot;next_agent&quot;,
+    &quot;result&quot;,
+    &quot;status&quot;,
+    &quot;version&quot;
+  ],
+  &quot;delta&quot;: {
+    &quot;cursor&quot;: 3,
+    &quot;memory&quot;: [
+      {
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;claim&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存 —— 查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。&quot;,
+        &quot;round&quot;: 0,
+        &quot;stage&quot;: &quot;executed&quot;,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;mem_id&quot;: 9,
+        &quot;sql_id&quot;: 27,
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;entities&quot;: {
+          &quot;key&quot;: &quot;id&quot;,
+          &quot;table&quot;: &quot;products&quot;,
+          &quot;values&quot;: [
+            2,
+            4,
+            6,
+            7,
+            8,
+            10
+          ]
+        },
+        &quot;rowcount&quot;: 6,
+        &quot;sql_text&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;verified&quot;: true,
+        &quot;created_at&quot;: &quot;2026-09-16T10:25:17.660399+00:00&quot;,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;global_task_id&quot;: &quot;180f196f-88e1-4751-8e2a-5c4fc3b61d83&quot;
+      },
+      {
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            15
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            15
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            15
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            15
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            15
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            15
+          ]
+        ],
+        &quot;claim&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数 —— 成功将 id 为 2、4、6、7、8、10 的 6 个商品库存更新为 15，受影响行数为 6，与预期一致。&quot;,
+        &quot;round&quot;: 0,
+        &quot;stage&quot;: &quot;executed&quot;,
+        &quot;action&quot;: &quot;UPDATE&quot;,
+        &quot;mem_id&quot;: 10,
+        &quot;sql_id&quot;: 30,
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;entities&quot;: {
+          &quot;key&quot;: &quot;id&quot;,
+          &quot;table&quot;: &quot;products&quot;,
+          &quot;values&quot;: [
+            2,
+            4,
+            6,
+            7,
+            8,
+            10
+          ]
+        },
+        &quot;rowcount&quot;: 6,
+        &quot;sql_text&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;verified&quot;: true,
+        &quot;created_at&quot;: &quot;2026-09-16T10:25:27.779298+00:00&quot;,
+        &quot;sub_task_id&quot;: &quot;st-2&quot;,
+        &quot;global_task_id&quot;: &quot;180f196f-88e1-4751-8e2a-5c4fc3b61d83&quot;
+      },
+      {
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            2
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            0
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            1
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            1
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            1
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            1
+          ]
+        ],
+        &quot;claim&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数） —— 查询成功，返回 6 个目标商品各自的去重购买人数（含 0 人商品），行数与商品数一致。&quot;,
+        &quot;round&quot;: 0,
+        &quot;stage&quot;: &quot;executed&quot;,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;mem_id&quot;: 11,
+        &quot;sql_id&quot;: 33,
+        &quot;columns&quot;: [
+          &quot;product_id&quot;,
+          &quot;product_name&quot;,
+          &quot;buyer_count&quot;
+        ],
+        &quot;entities&quot;: {
+          &quot;key&quot;: &quot;product_id&quot;,
+          &quot;table&quot;: &quot;products&quot;,
+          &quot;values&quot;: [
+            2,
+            4,
+            6,
+            7,
+            8,
+            10
+          ]
+        },
+        &quot;rowcount&quot;: 6,
+        &quot;sql_text&quot;: &quot;SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100&quot;,
+        &quot;verified&quot;: true,
+        &quot;created_at&quot;: &quot;2026-09-16T10:25:38.165069+00:00&quot;,
+        &quot;sub_task_id&quot;: &quot;st-3&quot;,
+        &quot;global_task_id&quot;: &quot;180f196f-88e1-4751-8e2a-5c4fc3b61d83&quot;
+      }
+    ],
+    &quot;result&quot;: {
+      &quot;ok&quot;: true,
+      &quot;kind&quot;: &quot;rows&quot;,
+      &quot;rows&quot;: [
+        [
+          2,
+          &quot;无线鼠标 M3&quot;,
+          2
+        ],
+        [
+          4,
+          &quot;USB-C 扩展坞&quot;,
+          0
+        ],
+        [
+          6,
+          &quot;降噪耳机 Air&quot;,
+          1
+        ],
+        [
+          7,
+          &quot;移动硬盘 1T&quot;,
+          1
+        ],
+        [
+          8,
+          &quot;机械臂显示器架&quot;,
+          1
+        ],
+        [
+          10,
+          &quot;4K 摄像头&quot;,
+          1
+        ]
+      ],
+      &quot;columns&quot;: [
+        &quot;product_id&quot;,
+        &quot;product_name&quot;,
+        &quot;buyer_count&quot;
+      ],
+      &quot;rowcount&quot;: 6,
+      &quot;truncated&quot;: false,
+      &quot;error_hint&quot;: &quot;&quot;,
+      &quot;duration_ms&quot;: 4,
+      &quot;model_summary&quot;: &quot;查询成功，返回 6 个目标商品各自的去重购买人数（含 0 人商品），行数与商品数一致。&quot;
+    },
+    &quot;status&quot;: &quot;executing&quot;,
+    &quot;explain&quot;: {
+      &quot;ok&quot;: true,
+      &quot;plan&quot;: [
+        {
+          &quot;Plan&quot;: {
+            &quot;Plans&quot;: [
+              {
+                &quot;Plans&quot;: [
+                  {
+                    &quot;Plans&quot;: [
+                      {
+                        &quot;Plans&quot;: [
+                          {
+                            &quot;Plans&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Disabled&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Hash Cond&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Join Type&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Node Type&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Plan Rows&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Plan Width&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Total Cost&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Inner Unique&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Startup Cost&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Async Capable&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Parallel Aware&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Parent Relationship&quot;: &quot;…（层级过深，已省略）&quot;
+                          },
+                          {
+                            &quot;Alias&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Filter&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Disabled&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Node Type&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Plan Rows&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Index Cond&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Index Name&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Plan Width&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Total Cost&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Startup Cost&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Async Capable&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Relation Name&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Parallel Aware&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Scan Direction&quot;: &quot;…（层级过深，已省略）&quot;,
+                            &quot;Parent Relationship&quot;: &quot;…（层级过深，已省略）&quot;
+                          }
+                        ],
+                        &quot;Disabled&quot;: false,
+                        &quot;Join Type&quot;: &quot;Left&quot;,
+                        &quot;Node Type&quot;: &quot;Nested Loop&quot;,
+                        &quot;Plan Rows&quot;: 12,
+                        &quot;Plan Width&quot;: 40,
+                        &quot;Total Cost&quot;: 43.43,
+                        &quot;Inner Unique&quot;: true,
+                        &quot;Startup Cost&quot;: 13.92,
+                        &quot;Async Capable&quot;: false,
+                        &quot;Parallel Aware&quot;: false,
+                        &quot;Parent Relationship&quot;: &quot;Outer&quot;
+                      }
+                    ],
+                    &quot;Disabled&quot;: false,
+                    &quot;Sort Key&quot;: [
+                      &quot;p.id&quot;,
+                      &quot;o.customer_id&quot;
+                    ],
+                    &quot;Node Type&quot;: &quot;Sort&quot;,
+                    &quot;Plan Rows&quot;: 12,
+                    &quot;Plan Width&quot;: 40,
+                    &quot;Total Cost&quot;: 43.67,
+                    &quot;Startup Cost&quot;: 43.64,
+                    &quot;Async Capable&quot;: false,
+                    &quot;Parallel Aware&quot;: false,
+                    &quot;Parent Relationship&quot;: &quot;Outer&quot;
+                  }
+                ],
+                &quot;Disabled&quot;: false,
+                &quot;Strategy&quot;: &quot;Sorted&quot;,
+                &quot;Group Key&quot;: [
+                  &quot;p.id&quot;
+                ],
+                &quot;Node Type&quot;: &quot;Aggregate&quot;,
+                &quot;Plan Rows&quot;: 6,
+                &quot;Plan Width&quot;: 44,
+                &quot;Total Cost&quot;: 43.79,
+                &quot;Partial Mode&quot;: &quot;Simple&quot;,
+                &quot;Startup Cost&quot;: 43.64,
+                &quot;Async Capable&quot;: false,
+                &quot;Parallel Aware&quot;: false,
+                &quot;Parent Relationship&quot;: &quot;Outer&quot;
+              }
+            ],
+            &quot;Disabled&quot;: false,
+            &quot;Node Type&quot;: &quot;Limit&quot;,
+            &quot;Plan Rows&quot;: 6,
+            &quot;Plan Width&quot;: 44,
+            &quot;Total Cost&quot;: 43.79,
+            &quot;Startup Cost&quot;: 43.64,
+            &quot;Async Capable&quot;: false,
+            &quot;Parallel Aware&quot;: false
+          }
+        }
+      ],
+      &quot;est_rows&quot;: 6,
+      &quot;node_type&quot;: &quot;Limit&quot;
+    },
+    &quot;history&quot;: [
+      {
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            &quot;外设&quot;,
+            159,
+            5
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            &quot;外设&quot;,
+            249,
+            5
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            &quot;音频&quot;,
+            899,
+            5
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            &quot;存储&quot;,
+            459,
+            5
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            &quot;显示&quot;,
+            699,
+            5
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            &quot;影音&quot;,
+            599,
+            5
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;category&quot;,
+          &quot;price&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;duration_ms&quot;: 3,
+        &quot;sub_task_id&quot;: &quot;st-1&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      },
+      {
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            15
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            15
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            15
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            15
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            15
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            15
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;UPDATE&quot;,
+        &quot;intent&quot;: &quot;把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;id&quot;,
+          &quot;name&quot;,
+          &quot;stock&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;写入&quot;,
+        &quot;duration_ms&quot;: 8,
+        &quot;sub_task_id&quot;: &quot;st-2&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      },
+      {
+        &quot;sql&quot;: &quot;SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100&quot;,
+        &quot;kind&quot;: &quot;rows&quot;,
+        &quot;rows&quot;: [
+          [
+            2,
+            &quot;无线鼠标 M3&quot;,
+            2
+          ],
+          [
+            4,
+            &quot;USB-C 扩展坞&quot;,
+            0
+          ],
+          [
+            6,
+            &quot;降噪耳机 Air&quot;,
+            1
+          ],
+          [
+            7,
+            &quot;移动硬盘 1T&quot;,
+            1
+          ],
+          [
+            8,
+            &quot;机械臂显示器架&quot;,
+            1
+          ],
+          [
+            10,
+            &quot;4K 摄像头&quot;,
+            1
+          ]
+        ],
+        &quot;error&quot;: null,
+        &quot;round&quot;: 0,
+        &quot;action&quot;: &quot;SELECT&quot;,
+        &quot;intent&quot;: &quot;统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数）&quot;,
+        &quot;tables&quot;: [
+          &quot;products&quot;,
+          &quot;order_items&quot;,
+          &quot;orders&quot;
+        ],
+        &quot;columns&quot;: [
+          &quot;product_id&quot;,
+          &quot;product_name&quot;,
+          &quot;buyer_count&quot;
+        ],
+        &quot;exec_ok&quot;: true,
+        &quot;executed&quot;: true,
+        &quot;sql_hash&quot;: &quot;f8c2060bd43e9875&quot;,
+        &quot;truncated&quot;: false,
+        &quot;validated&quot;: true,
+        &quot;risk_level&quot;: &quot;只读&quot;,
+        &quot;duration_ms&quot;: 4,
+        &quot;sub_task_id&quot;: &quot;st-3&quot;,
+        &quot;confirmed_by&quot;: null,
+        &quot;need_confirm&quot;: false,
+        &quot;affected_rows&quot;: 6,
+        &quot;validated_passed&quot;: true
+      }
+    ],
+    &quot;version&quot;: 12,
+    &quot;attempts&quot;: [
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;d7a7c40e31602971&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      },
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;df1bf68fa7060303&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      },
+      {
+        &quot;ok&quot;: true,
+        &quot;sql&quot;: &quot;SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100&quot;,
+        &quot;why&quot;: &quot;执行失败&quot;,
+        &quot;round&quot;: 0,
+        &quot;sql_hash&quot;: &quot;f8c2060bd43e9875&quot;,
+        &quot;error_sig&quot;: &quot;&quot;
+      }
+    ],
+    &quot;confirmed&quot;: false,
+    &quot;last_agent&quot;: &quot;executor&quot;,
+    &quot;next_agent&quot;: &quot;done&quot;
+  }
+}</pre>
+        </div><div class="raw-ev">
+          <div class="raw-hd"><span class="raw-seq">#437</span>
+            <b>handoff</b>
+            <span class="fi-dim">role=router · round=0 · version=12</span>
+            
+          </div>
+          <pre class="raw-pre">{
+  &quot;to&quot;: &quot;reviewer&quot;,
+  &quot;from&quot;: &quot;executor&quot;,
+  &quot;reason&quot;: &quot;3 个子任务全部完成，进入汇总&quot;,
+  &quot;overridden&quot;: true,
+  &quot;model_wanted&quot;: &quot;done&quot;
+}</pre>
+        </div>
+      </details></div></div><div class="flow-end">✅ 结束
+        · 共 1 轮 · 审查通过，且运行时一致性校验全部 pass</div></div>
+</div>
+</body>
+</html>

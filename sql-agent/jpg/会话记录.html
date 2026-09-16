@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>会话记录 · 先看一下库存小于 6 的商品有哪些，然后把它们的库存都补到 15 ，再根据被修…</title>
+<style>
+
+  :root { --bg:#f5f7fa; --line:#e3e8ef; --text:#1f2937; --muted:#6b7280;
+          --planner:#4f46e5; --generator:#0891b2; --validator:#7c3aed; --executor:#d97706;
+          --fixer:#db2777; --reviewer:#e11d48; --router:#64748b;
+          --ok:#16a34a; --bad:#dc2626; --warn:#d97706; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); overflow:hidden;
+         font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  .mono { font-family:"Cascadia Mono",Consolas,monospace; font-size:12px; }
+
+  header { height:54px; background:#111827; color:#f9fafb; padding:0 16px;
+           display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:14px; margin:0; font-weight:600; white-space:nowrap; }
+  header .pills { display:flex; gap:7px; overflow:hidden; }
+  .pill { background:#1f2937; border:1px solid #374151; border-radius:999px;
+          padding:2px 10px; font-size:11.5px; color:#d1d5db; white-space:nowrap; }
+  .pill b { color:#fff; }
+  .pill.ok { border-color:#166534; color:#86efac; }
+  .pill.bad { border-color:#991b1b; color:#fca5a5; }
+  .hbtns { margin-left:auto; display:flex; gap:7px; }
+  .hbtn { background:#374151; color:#e5e7eb; border:0; border-radius:6px;
+          padding:6px 12px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .hbtn:hover { background:#4b5563; }
+
+  .layout { display:flex; height:calc(100vh - 54px); }
+  .side { width:212px; flex:0 0 212px; background:#fff; border-right:1px solid var(--line);
+          display:flex; flex-direction:column; }
+  .side h2 { margin:0; padding:12px; font-size:12.5px; color:#374151;
+             border-bottom:1px solid var(--line); display:flex; align-items:center; }
+  .side h2 .plus { margin-left:auto; cursor:pointer; color:#2563eb; font-weight:700; font-size:16px; padding:0 4px; }
+  .side .list { flex:1; overflow:auto; padding:8px; }
+  .sess { padding:8px 9px; border:1px solid var(--line); border-radius:8px; margin-bottom:7px;
+          cursor:pointer; background:#fff; }
+  .sess:hover { border-color:#93c5fd; background:#f8fafc; }
+  .sess.on { border-color:#2563eb; box-shadow:0 0 0 2px #dbeafe inset; }
+  .sess .t { font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sess .m { font-size:10.5px; color:var(--muted); display:flex; gap:5px; margin-top:3px; flex-wrap:wrap; }
+  .sess .imp { font-size:10.5px; font-weight:600; border-radius:4px; padding:0 5px; }
+  .sess .imp.write { background:#fef3c7; color:#92400e; }
+  .sess .imp.read  { background:#dbeafe; color:#1d4ed8; }
+  .sess .imp.wait  { background:#ffedd5; color:#9a3412; }
+  .sess .imp.none  { background:#f3f4f6; color:#6b7280; }
+  .sess .imp.bad   { background:#fee2e2; color:#991b1b; }
+
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .chat-scroll { flex:1; overflow:auto; }
+  .chat { padding:18px 20px 6px; display:flex; flex-direction:column; gap:13px;
+          max-width:1040px; margin:0 auto; }
+
+  .msg { display:flex; gap:9px; align-items:flex-start; }
+  .msg.user { justify-content:flex-end; }
+  .msg.sys { justify-content:center; }
+  .avatar { width:30px; height:30px; flex:0 0 30px; border-radius:9px; color:#fff;
+            display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; margin-top:2px; }
+  .bubble { border-radius:14px 14px 14px 4px; padding:9px 13px; font-size:13.5px;
+            max-width:860px; min-width:0; overflow-wrap:anywhere; }
+  .msg.user .bubble { background:#2563eb; color:#fff; border-radius:14px 14px 4px 14px; }
+  .msg.sys .bubble { background:#eef2f7; color:#64748b; font-size:12.5px; border-radius:999px; padding:5px 14px; }
+  .msg.agent .bubble { background:#fff; border:1px solid var(--line); box-shadow:0 1px 2px rgba(16,24,40,.04); }
+  .msg.agent.bad .bubble { background:#fff7f7; border-color:#fca5a5; }
+  .msg.agent.warn .bubble { background:#fffbeb; border-color:#fcd34d; }
+  .who { font-size:12px; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .who .en { font-size:10px; color:#9ca3af; font-family:"Cascadia Mono",Consolas,monospace; font-weight:400; }
+  .who .tag { font-size:10.5px; font-weight:500; color:var(--muted); background:#f3f4f6; border-radius:999px; padding:1px 8px; }
+
+  .routebar { display:flex; justify-content:center; }
+  .routebar span { font-size:11.5px; color:#64748b; background:#f1f5f9;
+                   border:1px dashed #cbd5e1; border-radius:999px; padding:3px 14px; }
+  .routebar.forced span { border-color:#fcd34d; background:#fffbeb; color:#92400e; }
+
+  .dots span { display:inline-block; width:5px; height:5px; margin-right:3px; border-radius:50%;
+               background:#94a3b8; animation:blink 1.2s infinite; }
+  .dots span:nth-child(2){animation-delay:.2s;} .dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink { 0%,60%,100%{opacity:.25} 30%{opacity:1} }
+
+  pre.sql { margin:6px 0; padding:9px 11px; background:#0b1220; color:#a7f3d0; border-radius:8px;
+            font-size:12.5px; overflow-x:auto; white-space:pre-wrap; word-break:break-word; line-height:1.65; }
+  .risk { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11px; font-weight:700; }
+  .r-只读 { background:#dcfce7; color:#166534; }
+  .r-写入 { background:#dbeafe; color:#1d4ed8; }
+  .r-需确认 { background:#fef3c7; color:#92400e; }
+  .r-禁止 { background:#fee2e2; color:#991b1b; }
+
+  .intent { border-left:3px solid #e5e7eb; padding:4px 9px; margin:4px 0; background:#fafafa;
+            border-radius:0 6px 6px 0; font-size:12.5px; }
+  .intent .id { font-weight:700; color:var(--planner); }
+  .chk { display:flex; gap:6px; font-size:12px; padding:2px 0; border-bottom:1px dashed #eef0f3; }
+  .chk .mark { font-weight:700; width:14px; }
+  .chk.pass .mark { color:var(--ok); } .chk.fail .mark { color:var(--bad); }
+  .chk .d { color:var(--muted); font-size:11px; }
+
+  .verdict { margin-top:7px; padding:7px 10px; border-radius:8px; font-size:13px; font-weight:700; }
+  .verdict.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .verdict.no { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+  .verdict .why { display:block; font-weight:400; font-size:12px; margin-top:4px; }
+
+  table.grid { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+  table.grid th, table.grid td { border:1px solid var(--line); padding:4px 7px; text-align:left; }
+  table.grid th { background:#f8fafc; color:var(--muted); font-weight:600; }
+  .affect { font-size:12.5px; margin-top:5px; }
+  .affect b { color:#b45309; }
+
+  .confirmcard { margin-top:8px; border:2px solid var(--warn); background:#fffbeb;
+                 border-radius:10px; padding:10px 12px; }
+  .confirmcard h4 { margin:0 0 6px; font-size:13px; color:#92400e; }
+  .confirmcard .acts { display:flex; gap:8px; margin-top:9px; }
+  .btn { border:0; border-radius:8px; padding:6px 16px; font-size:13px; font-weight:700; cursor:pointer; }
+  .btn.ok { background:#16a34a; color:#fff; }
+  .btn.ok:hover { background:#15803d; }
+  .btn.cancel { background:#f3f4f6; color:#374151; }
+  .btn.cancel:hover { background:#e5e7eb; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+
+  .composer { border-top:1px solid var(--line); background:#fff; padding:10px 16px 12px; }
+  .composer .samples { max-width:1040px; margin:0 auto 7px; display:flex; gap:7px;
+                       align-items:center; flex-wrap:wrap; font-size:11.5px; color:#9ca3af; }
+  .opt { border:1px solid #c7d2fe; background:#eef2ff; color:#3730a3; border-radius:8px;
+         padding:3px 11px; font-size:11.5px; cursor:pointer; font-weight:600; }
+  .opt:hover { background:#e0e7ff; }
+  .composer .inner { max-width:1040px; margin:0 auto; display:flex; gap:9px; align-items:flex-end; }
+  textarea { flex:1; resize:none; border:1px solid var(--line); border-radius:10px; padding:9px 12px;
+             font:inherit; font-size:13.5px; max-height:150px; min-height:42px; outline:none; color:var(--text); }
+  textarea:focus { border-color:#93c5fd; box-shadow:0 0 0 3px #dbeafe; }
+  .send { background:#2563eb; color:#fff; border:0; border-radius:10px; padding:11px 20px;
+          font-size:13.5px; font-weight:600; cursor:pointer; flex-shrink:0; }
+  .send:hover { background:#1d4ed8; }
+  .send:disabled { background:#9ca3af; cursor:not-allowed; }
+  .tip { max-width:1040px; margin:5px auto 0; font-size:11px; color:#9ca3af; }
+
+  .overlay { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; z-index:50; padding:26px; }
+  .overlay.open { display:block; }
+  .win { background:#fff; border-radius:12px; height:100%; display:flex; flex-direction:column;
+         overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.35); }
+  .bar { display:flex; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line);
+         background:#f9fafb; flex-wrap:wrap; }
+  .bar b { font-size:14px; } .bar .hint { font-size:12px; color:var(--muted); }
+  .bar .acts { margin-left:auto; }
+  .mini { background:#fff; color:#374151; border:1px solid var(--line); border-radius:6px;
+          padding:4px 11px; font-size:12px; font-weight:600; cursor:pointer; }
+  .mini:hover { background:#f3f4f6; }
+  .win-body { flex:1; overflow:auto; padding:16px; }
+  .empty { color:var(--muted); font-size:12.5px; text-align:center; padding:22px 8px; }
+  /* ---------- 消耗清单 ---------- */
+  .use-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
+  .use-card { border:1px solid var(--line); border-left-width:4px; border-radius:9px;
+              padding:10px 12px; background:#fbfdff; }
+  .use-card .k { font-size:11.5px; color:var(--muted); }
+  .use-card .v { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums;
+                 margin:2px 0 1px; color:#0f172a; }
+  .use-card .d { font-size:11px; color:#94a3b8; }
+  .use-card.c1 { border-left-color:#4f46e5; } .use-card.c1 .v { color:#4f46e5; }
+  .use-card.c2 { border-left-color:#0891b2; } .use-card.c2 .v { color:#0891b2; }
+  .use-card.c3 { border-left-color:#db2777; } .use-card.c3 .v { color:#db2777; }
+  .use-card.c4 { border-left-color:#0f766e; } .use-card.c4 .v { color:#0f766e; }
+  .use-sec { font-size:12.5px; font-weight:700; color:#334155; margin:16px 0 2px;
+             padding-left:7px; border-left:3px solid #94a3b8; }
+  .bar-mini { display:flex; align-items:center; gap:6px; }
+  .bar-mini i { display:block; height:7px; border-radius:4px; background:#5eead4; min-width:2px; }
+  .bar-mini span { font-size:10.5px; color:#64748b; font-variant-numeric:tabular-nums; }
+
+  /* 时序图 */
+  .legend { display:flex; gap:16px; font-size:12px; color:var(--muted); padding-bottom:10px; flex-wrap:wrap; }
+  .legend i { display:inline-block; width:22px; height:0; border-top:2px solid #64748b;
+              vertical-align:middle; margin-right:5px; }
+  .legend i.red { border-top:2px dashed #dc2626; }
+  .legend i.grn { border-top:2px solid #16a34a; }
+  .legend i.amb { border-top:2px dashed #d97706; }
+  #seq-canvas { display:inline-block; min-width:100%; }
+
+  /* ---------- 数据流转链路 ---------- */
+  .flow { display:flex; flex-direction:column; gap:10px; }
+  .flow-bar { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:#374151;
+              background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:9px 12px; }
+  .flow-bar b { color:#0f172a; font-variant-numeric:tabular-nums; }
+  .flow-start { font-size:12px; color:#334155; background:#eff6ff; border:1px solid #bfdbfe;
+                border-radius:8px; padding:9px 12px; }
+  .hop { border:1px solid #e5e7eb; border-radius:10px; background:#fff; overflow:hidden; }
+  .hop.ovr { border-color:#f59e0b; }
+  .hop-hd { display:flex; align-items:center; gap:7px; padding:8px 12px; background:#f9fafb;
+            border-bottom:1px solid #eef2f7; font-size:13px; }
+  .hop.ovr .hop-hd { background:#fffbeb; }
+  .hop-n { font-size:11px; color:#94a3b8; font-variant-numeric:tabular-nums; min-width:16px; }
+  .face { width:20px; height:20px; border-radius:5px; color:#fff; font-size:11px; flex:none;
+          display:inline-flex; align-items:center; justify-content:center; }
+  .arrow { color:#94a3b8; }
+  .badge { margin-left:auto; font-size:11px; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .badge.ok { background:#dcfce7; color:#166534; }
+  .badge.ovr { background:#fef3c7; color:#92400e; font-weight:600; }
+  .hop-bd { padding:9px 12px; display:flex; flex-direction:column; gap:7px; }
+  .ovr-box { background:#fffbeb; border-left:3px solid #f59e0b; padding:7px 10px;
+             font-size:12px; border-radius:0 6px 6px 0; line-height:1.7; }
+  .ovr-box .strike { color:#b45309; text-decoration:line-through; }
+  .fi { font-size:12px; }
+  .fi-k { font-size:11px; color:#64748b; letter-spacing:.04em; margin-bottom:3px; }
+  .fi-k b { color:#334155; }
+  .fi-line { color:#334155; line-height:1.7; }
+  .fi-dim { color:#94a3b8; }
+  .fi-bad { color:#b91c1c; }
+  .fi-pre { margin:3px 0 0; padding:7px 9px; background:#0f172a; color:#e2e8f0; border-radius:6px;
+            font-family:ui-monospace,Consolas,monospace; font-size:11.5px; white-space:pre-wrap;
+            word-break:break-all; }
+  .flow-end { text-align:center; font-size:12px; color:#475569; padding:8px;
+              background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; }
+
+  /* ---------- 汇总答复里的 Markdown ---------- */
+  .md-h { font-size:13.5px; font-weight:700; color:#0f172a; margin:11px 0 5px; }
+  .md-p { font-size:13.5px; line-height:1.75; color:#1f2937; margin:3px 0; }
+  .md-ul { margin:4px 0 4px 20px; padding:0; font-size:13.5px; color:#1f2937; }
+  .md-ul li { margin:2px 0; line-height:1.7; }
+  .md code { background:#f1f5f9; color:#0f172a; padding:1px 5px; border-radius:4px;
+             font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  table.md { margin:8px 0 4px; }
+  table.md td, table.md th { font-variant-numeric:tabular-nums; }
+
+  /* ---------- 多轮对话的轮次分隔 ---------- */
+  .turnsep { display:flex; align-items:center; gap:10px; margin:14px 4px 4px; }
+  .turnsep::before, .turnsep::after { content:''; flex:1; height:1px; background:#e2e8f0; }
+  .turnsep span { font-size:11px; color:#94a3b8; white-space:nowrap; }
+
+  /* ---------- 原始结构（真实传过去的内容） ---------- */
+  .raw { margin-top:9px; border-top:1px dashed #e2e8f0; padding-top:8px; }
+  .raw > summary { cursor:pointer; font-size:11.5px; color:#475569; }
+  .raw > summary:hover { color:#0f172a; }
+  .raw-ev { margin-top:8px; }
+  .raw-ev + .raw-ev { border-top:1px solid #f1f5f9; padding-top:8px; }
+  .raw-hd { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+            font-size:11px; color:#334155; }
+  .raw-seq { color:#94a3b8; font-variant-numeric:tabular-nums; }
+  .raw-pre { margin:4px 0 0; padding:9px 11px; background:#0f172a; color:#cbd5e1;
+             border-radius:7px; font-family:ui-monospace,Consolas,monospace;
+             font-size:11px; line-height:1.6; white-space:pre-wrap; word-break:break-word;
+             max-height:420px; overflow:auto; }
+  .delta-tag { background:#0ea5e9; color:#fff; font-size:10px; padding:1px 6px;
+               border-radius:999px; }
+
+  html, body { height:auto !important; overflow:auto !important; }
+  body { padding:20px 16px 48px; background:#f5f7fa; }
+  .exp-wrap { max-width:1040px; margin:0 auto; }
+  .exp-hd { margin:0 4px 16px; }
+  .exp-hd h1 { font-size:16px; margin:0 0 6px; }
+  .exp-hd .m { font-size:11.5px; color:#6b7280; line-height:1.85; }
+  .exp-hd .m code { background:#eef2f7; border-radius:3px; padding:0 4px; }
+  .exp-chat { padding:0; max-width:none; }
+  /* 页眉那行「改了什么数据」的徽标：原样式是挂在侧栏 .sess 下的，这里补一份 */
+  .imp { display:inline-block; border-radius:999px; padding:0 7px; font-size:11px; font-weight:600; }
+  .imp.write { background:#fef3c7; color:#92400e; }
+  .imp.read  { background:#dbeafe; color:#1d4ed8; }
+  .imp.wait  { background:#ffedd5; color:#9a3412; }
+  .imp.none  { background:#f3f4f6; color:#6b7280; }
+  .imp.bad   { background:#fee2e2; color:#991b1b; }
+  /* 兜底：静态页里没有任何可点的东西，也没有"正在输入" */
+  [data-confirm], [data-open], .dots { display:none !important; }
+  @media print { body { background:#fff; } .bubble, .hop { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<div class="exp-wrap">
+<div class="exp-hd">
+<h1>📄 会话记录</h1>
+<div class="m">问题：先看一下库存小于 6 的商品有哪些，然后把它们的库存都补到 15 ，再根据被修改的数据查询有多少人购买了<br><b>已完成</b> · <span class="imp write">✎ 改 products 6 行</span> · 单轮 · 💸 16 次 · 29,643 tok<br>导出时间 2026/9/16 18:42:32 · 数据来自 <code>agent_sql</code>（agent_run / agent_event / sql_audit），可逐条回放<br>本文件样式已内联，不依赖任何外部资源：不用连网、不用起服务，双击即可打开。</div>
+</div>
+<div class="chat exp-chat"><div class="msg user"><div class="bubble">先看一下库存小于 6 的商品有哪些，然后把它们的库存都补到 15 ，再根据被修改的数据查询有多少人购买了</div></div><div class="msg sys"><div class="bubble" style="">开始。系统目录中的表：customers、order_items、orders、products</div></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--planner)">规</div><div class="bubble">
+    <div class="who" style="color:var(--planner)">规划器<span class="en">planner</span>
+      </div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px">
+        <span class="tag" style="background:#e0e7ff;color:#3730a3">模式：正常执行</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">⚠ 安全。属于常规的查询与数据更新（把库存补到 15），未涉及 DDL、未访问系统表或越权 schema、未要求绕过授权。</span>
+      </div><div>用户想先查出库存小于 6 的商品，把这些商品的库存补到 15，再基于被修改的这些商品统计购买人数。</div><div class="intent"><span class="id">st-1</span> 查询库存小于 6 的商品（含商品标识与当前库存）
+        <span class="tag">查询</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：返回所有库存小于 6 的商品清单及其当前库存</div><div class="intent"><span class="id">st-2</span> 把上一步查出的这些商品的库存统一补到 15
+        <span class="tag">修改</span><span class="d" style="font-size:11px;color:#7c3aed">依赖 st-1</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：上一步查出的每个商品库存都被更新为 15，并给出受影响行数</div><div class="intent"><span class="id">st-3</span> 统计上一步被修改的那些商品各有多少人购买（购买人数）
+        <span class="tag">查询</span><span class="d" style="font-size:11px;color:#7c3aed">依赖 st-1</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：给出被修改商品对应的购买人数统计结果</div><div style="font-size:11.5px;color:#6b7280;margin-top:4px">这是一个「查询 → 修改 → 基于修改结果再查询」的链式需求，拆成 3 个子任务：st-1 查库存小于 6 的商品；st-2 依赖 st-1，把这些商品的库存改为 15；st-3 依赖 st-1（被修改的数据即 st-1 查出的商品集合），统计这些商品的购买人数。用户提到的「先修正再生成再校验再返回」是系统内部链路，不额外拆任务。</div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">拆出 3 个数据操作任务</div></div></div><div class="routebar "><span>
+        规划器 → SQL 生成｜为子任务 st-1 生成 SQL
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--generator)">生</div><div class="bubble">
+    <div class="who" style="color:var(--generator)">SQL 生成<span class="en">generator</span>
+      </div><div style="font-size:12px">🔍 第一层·选表：<b>order_items、products</b>
+      <div class="d" style="font-size:11.5px;color:#6b7280">当前子任务只需查询库存小于 6 的商品及其商品标识与当前库存，products 表包含商品名称、分类、单价、库存等字段，可直接满足筛选与输出需求。虽然整体任务后续还要统计购买人数（会用到 order_items、orders、customers），但本步仅做库存筛选，故只选 products。</div>
+      <div class="d" style="font-size:11px;color:#9ca3af">候选：customers、order_items、orders、products</div></div><div style="display:flex;gap:7px;align-items:center;margin-bottom:2px">
+      <span class="risk r-只读">只读</span>
+      <span style="font-size:11.5px;color:#6b7280">SELECT · products</span></div>
+      <pre class="sql">SELECT p.id, p.name, p.category, p.price, p.stock FROM products p WHERE p.stock &lt; 6 ORDER BY p.stock ASC, p.id ASC LIMIT 100</pre><div style="font-size:11.5px;color:#6b7280">本步只需商品档案表 products 即可判定库存，条件为 stock &lt; 6（严格小于，不含等于 6）；order_items 在本步不参与过滤，仅作为后续「按被修改商品统计购买人数」的关联表，故此处不 JOIN，避免因无订单明细的商品被漏掉。输出 id/name/category/price/stock 便于后续补货与统计定位；加 LIMIT 100 防止全表返回。</div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">生成 SQL（SELECT · 风险 只读）</div></div></div><div class="routebar "><span>
+        SQL 生成 → SQL 校验｜SQL 必须经过校验才能执行
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--validator)">校</div><div class="bubble">
+    <div class="who" style="color:var(--validator)">SQL 校验<span class="en">validator</span>
+      </div><div class="chk pass"><span class="mark">✓</span>
+      <span>静态防线（危险语句 / 多语句 / 表名授权）<div class="d">SELECT · 风险 只读</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>SQL 涉及的表必须在生成器选定的表之内<div class="d">只用了生成器选定的表：order_items、products</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>表和字段必须能在系统目录里对上（按表信息核对）<div class="d">表和字段都能在系统目录里对上（1 张表）</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>校验阶段不访问数据库<div class="d">表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>表使用是否在授权范围内<div class="d">仅使用 products，属于生成器选定的 order_items、products 之内</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>字段是否与系统目录一致<div class="d">p.id / p.name / p.category / p.price / p.stock 均存在于 products 表定义中</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>WHERE 是否覆盖任务限定「库存小于 6」<div class="d">p.stock &lt; 6 精确对应，未额外引入会漏掉数据的过滤条件</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>是否包含任务要求的商品标识与当前库存<div class="d">输出 p.id（商品标识）与 p.stock（当前库存），并附带 name/category/price 作为补充信息</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>聚合与 GROUP BY 是否配套<div class="d">无聚合函数，无需 GROUP BY</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>JOIN 条件是否合理<div class="d">本查询为单表查询，无 JOIN，不涉及 order_items</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>是否只读且无多语句/注释<div class="d">单条 SELECT，无分号结尾、无注释、无写操作</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>运行时确定性检查结果<div class="d">rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass</div></span></div><div class="verdict ok">✓ 校验通过
+      
+      <span class="why">任务只要求查询库存小于 6 的商品（含商品标识与当前库存）。SQL 从 products 表选取 id、name、category、price、stock，WHERE p.stock &lt; 6 精确覆盖了「库存小于 6」的限定，ORDER BY stock ASC, id ASC 与 LIMIT 100 只是排序与截断，不影响结果正确性。表 products 在生成器选定表范围内，字段 id/name/category/price/stock 均与系统目录一致，无 JOIN、无聚合，不存在 GROUP BY 配套问题。运行时四项确定性检查全部 pass，故判定通过。</span></div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">校验通过</div></div></div><div class="routebar "><span>
+        SQL 校验 → SQL 执行｜校验通过，可以执行
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--executor)">执</div><div class="bubble">
+    <div class="who" style="color:var(--executor)">SQL 执行<span class="en">executor</span>
+      </div><div class="affect">返回 <b>6</b> 行（3ms）</div><table class="grid"><thead><tr><th>id</th><th>name</th><th>category</th><th>price</th><th>stock</th></tr></thead><tbody><tr><td>2</td><td>无线鼠标 M3</td><td>外设</td><td>159</td><td>5</td></tr><tr><td>4</td><td>USB-C 扩展坞</td><td>外设</td><td>249</td><td>5</td></tr><tr><td>6</td><td>降噪耳机 Air</td><td>音频</td><td>899</td><td>5</td></tr><tr><td>7</td><td>移动硬盘 1T</td><td>存储</td><td>459</td><td>5</td></tr><tr><td>8</td><td>机械臂显示器架</td><td>显示</td><td>699</td><td>5</td></tr><tr><td>10</td><td>4K 摄像头</td><td>影音</td><td>599</td><td>5</td></tr></tbody></table><div style="border-left:3px solid #0d9488;background:#f0fdfa;padding:6px 8px;border-radius:5px;margin:4px 0">
+      <div style="font-size:12px;font-weight:700;color:#0f766e">🧠 写入共享记忆
+        <span style="font-weight:400;color:#6b7280">· 只有真正执行过的才算事实</span></div>
+      <div style="font-size:12px;color:#334155;margin-top:2px">查询库存小于 6 的商品，返回商品 ID、名称、分类、单价与当前库存 —— 查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。</div>
+      <div style="font-size:11.5px;color:#6b7280">
+        来源 sql_id=<b>—</b> · 6 行
+        <span style="color:#166534">· 已核对（执行器验证）</span></div><div style="font-size:11.5px;color:#0f766e;margin-top:2px">可复用实体：products.id =
+        2、4、6、7、8、10</div></div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">查询成功，返回 6 条库存小于 6 的商品记录，含 ID、名称、分类、单价与库存，按库存升序排列。</div></div></div><div class="routebar forced"><span>
+        SQL 执行 → 规划器｜子任务 st-1 已执行完成，回到规划器复查剩余 2 个任务是否仍成立
+        　· 护栏改道（模型原本想给 结束）</span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--planner)">规</div><div class="bubble">
+    <div class="who" style="color:var(--planner)">规划器<span class="en">planner</span>
+      </div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px">
+        <span class="tag" style="background:#fef3c7;color:#92400e">🔁 规划器复查</span>
+        <span class="tag" style="background:#e0e7ff;color:#3730a3">调整后续任务</span>
+      </div><div class="intent"><span class="id">st-1</span> ✓ 查询库存小于 6 的商品（含商品标识与当前库存）
+        <span class="tag">查询</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：返回库存&lt;6 的商品清单，含商品 ID 与当前库存</div><div class="intent"><span class="id">st-2</span> · 把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15
+        <span class="tag">修改</span><span class="d" style="font-size:11px;color:#7c3aed">依赖 st-1</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：这 6 个商品的库存均被更新为 15，并返回受影响行数</div><div class="intent"><span class="id">st-3</span> · 统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数）
+        <span class="tag">查询</span><span class="d" style="font-size:11px;color:#7c3aed">依赖 st-1</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：返回这 6 个商品各自的购买人数</div><div style="font-size:11.5px;color:#6b7280;margin-top:4px">st-1 已实际执行并返回 6 个具体商品 ID（2、4、6、7、8、10），后续两步的前提已满足。原描述「上一步查出的这些商品」在拿到具体值后应明确为这 6 个 ID，避免生成器范围含糊。st-3 依赖 st-1 的商品集合即可（购买人数统计基于被修改的商品），无需依赖 st-2 的执行结果。</div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">复查：调整后续任务（现共 3 个）</div></div></div><div class="routebar "><span>
+        规划器 → SQL 生成｜为子任务 st-2 生成 SQL
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--generator)">生</div><div class="bubble">
+    <div class="who" style="color:var(--generator)">SQL 生成<span class="en">generator</span>
+      </div><div style="font-size:12px">🔍 第一层·选表：<b>order_items、products</b>
+      <div class="d" style="font-size:11.5px;color:#6b7280">本子任务只做「把商品 ID 为 2、4、6、7、8、10 的库存统一更新为 15」这一修改操作，库存字段在 products 表中，因此只需 products 表。后续「查询有多少人购买了这些商品」的子任务才会用到 order_items 与 orders（可能还有 customers），但本步不涉及。</div>
+      <div class="d" style="font-size:11px;color:#9ca3af">候选：customers、order_items、orders、products</div></div><div style="display:flex;gap:7px;align-items:center;margin-bottom:2px">
+      <span class="risk r-写入">写入</span>
+      <span style="font-size:11.5px;color:#6b7280">UPDATE · products</span></div>
+      <pre class="sql">UPDATE products SET stock = 15 WHERE id IN (2, 4, 6, 7, 8, 10) RETURNING id, name, stock</pre><div style="font-size:11.5px;color:#6b7280">依据 st-1 已执行查询确认的低库存商品 ID 列表（2、4、6、7、8、10），直接用 IN 列表作为 WHERE 条件，避免用 stock&lt;6 这类代理条件（更新后条件会失效且可能误伤）。UPDATE 带 WHERE 限定这 6 行；RETURNING 返回被修改行的 id/name/stock，可用于核对 6 行均被更新为 15（受影响行数即返回行数）。本步只涉及 products 表，order_items 留给下一步统计购买人数。</div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">生成 SQL（UPDATE · 风险 写入）</div></div></div><div class="routebar forced"><span>
+        SQL 生成 → SQL 校验｜SQL 还没校验，不能跳过校验 ⇒ 护栏改去校验器（模型想交给执行智能体）
+        　· 护栏改道（模型原本想给 SQL 执行）</span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--validator)">校</div><div class="bubble">
+    <div class="who" style="color:var(--validator)">SQL 校验<span class="en">validator</span>
+      </div><div class="chk pass"><span class="mark">✓</span>
+      <span>静态防线（危险语句 / 多语句 / 表名授权）<div class="d">UPDATE · 风险 写入</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>SQL 涉及的表必须在生成器选定的表之内<div class="d">只用了生成器选定的表：order_items、products</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>表和字段必须能在系统目录里对上（按表信息核对）<div class="d">SQL 里没有目录中的表，字段核对跳过</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>校验阶段不访问数据库<div class="d">表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>表名是否在授权范围内<div class="d">只使用 products 表，属于生成器选定表（order_items、products）</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>字段是否存在（products.id / products.stock / products.name）<div class="d">products 表含 id INT PK、name TEXT、stock INT，字段均对得上</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>WHERE 条件是否覆盖任务限定（ID 为 2、4、6、7、8、10 这 6 个商品）<div class="d">id IN (2,4,6,7,8,10) 精确覆盖 6 个目标商品，无遗漏无多余</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>SET 值是否符合任务要求（库存统一更新为 15）<div class="d">SET stock = 15 与任务要求一致</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>语句是否为单条、无分号、无注释<div class="d">单条 UPDATE 语句，无分号结尾、无注释、无多语句</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>RETURNING 子句是否合法且不越权<div class="d">RETURNING id, name, stock 均为 products 表字段，用于回显被修改数据，合法</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>是否满足任务中“根据被修改的数据查询有多少人购买”的后续需求<div class="d">本任务仅要求执行库存更新（修改），RETURNING 已回显被改商品 ID，可供后续 JOIN order_items 统计购买人数；本步不越权做统计</div></span></div><div class="verdict ok">✓ 校验通过
+      
+      <span class="why">SQL 为单条 UPDATE，仅涉及授权表 products，字段 id/name/stock 与目录一致；WHERE id IN (2,4,6,7,8,10) 精确覆盖任务指定的 6 个商品，SET stock = 15 与要求一致；RETURNING 回显被修改行，便于后续按被改商品统计购买人数。运行时确定性检查全部 pass，无更严格项被违反，故通过。</span></div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">校验通过</div></div></div><div class="routebar "><span>
+        SQL 校验 → SQL 执行｜校验通过，可以执行
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--executor)">执</div><div class="bubble">
+    <div class="who" style="color:var(--executor)">SQL 执行<span class="en">executor</span>
+      </div><div class="affect">返回 <b>6</b> 行（8ms）</div><table class="grid"><thead><tr><th>id</th><th>name</th><th>stock</th></tr></thead><tbody><tr><td>2</td><td>无线鼠标 M3</td><td>15</td></tr><tr><td>4</td><td>USB-C 扩展坞</td><td>15</td></tr><tr><td>6</td><td>降噪耳机 Air</td><td>15</td></tr><tr><td>7</td><td>移动硬盘 1T</td><td>15</td></tr><tr><td>8</td><td>机械臂显示器架</td><td>15</td></tr><tr><td>10</td><td>4K 摄像头</td><td>15</td></tr></tbody></table><div style="border-left:3px solid #0d9488;background:#f0fdfa;padding:6px 8px;border-radius:5px;margin:4px 0">
+      <div style="font-size:12px;font-weight:700;color:#0f766e">🧠 写入共享记忆
+        <span style="font-weight:400;color:#6b7280">· 只有真正执行过的才算事实</span></div>
+      <div style="font-size:12px;color:#334155;margin-top:2px">把商品 ID 为 2、4、6、7、8、10 的 6 个商品库存统一更新为 15，并返回受影响行数 —— 成功将 id 为 2、4、6、7、8、10 的 6 个商品库存更新为 15，受影响行数为 6，与预期一致。</div>
+      <div style="font-size:11.5px;color:#6b7280">
+        来源 sql_id=<b>—</b> · 6 行
+        <span style="color:#166534">· 已核对（执行器验证）</span></div><div style="font-size:11.5px;color:#0f766e;margin-top:2px">可复用实体：products.id =
+        2、4、6、7、8、10</div></div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">成功将 id 为 2、4、6、7、8、10 的 6 个商品库存更新为 15，受影响行数为 6，与预期一致。</div></div></div><div class="routebar forced"><span>
+        SQL 执行 → 规划器｜子任务 st-2 已执行完成，回到规划器复查剩余 1 个任务是否仍成立
+        　· 护栏改道（模型原本想给 结束）</span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--planner)">规</div><div class="bubble">
+    <div class="who" style="color:var(--planner)">规划器<span class="en">planner</span>
+      </div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px">
+        <span class="tag" style="background:#fef3c7;color:#92400e">🔁 规划器复查</span>
+        <span class="tag" style="background:#e0e7ff;color:#3730a3">剩余计划不变，继续做</span>
+      </div><div class="intent"><span class="id">st-1</span> ✓ 查询库存小于 6 的商品（含商品标识与当前库存）
+        <span class="tag">查询</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：返回库存&lt;6 的商品清单，含商品 ID 与当前库存</div><div class="intent"><span class="id">st-2</span> ✓ 把商品 ID 为 2、4、6、7、8、10 这 6 个商品的库存统一更新为 15
+        <span class="tag">修改</span><span class="d" style="font-size:11px;color:#7c3aed">依赖 st-1</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：这 6 个商品的库存均被更新为 15，并返回受影响行数</div><div class="intent"><span class="id">st-3</span> · 统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自有多少人购买（购买人数）
+        <span class="tag">查询</span><span class="d" style="font-size:11px;color:#7c3aed">依赖 st-1</span></div><div style="font-size:11px;color:#9ca3af;margin:-2px 0 6px 6px">完成标准：返回这 6 个商品各自的购买人数</div><div style="font-size:11.5px;color:#6b7280;margin-top:4px">st-1 已确认库存&lt;6的商品为 ID 2、4、6、7、8、10；st-2 已把这 6 个商品库存更新为 15（影响 6 行）。st-3 的统计范围已由 st-1/st-2 的实际结果确定为这 6 个商品 ID，描述已足够明确，无需调整。</div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">复查：剩余计划仍然成立，继续做</div></div></div><div class="routebar "><span>
+        规划器 → SQL 生成｜子任务 st-2 已完成，接着为 st-3 生成 SQL
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--generator)">生</div><div class="bubble">
+    <div class="who" style="color:var(--generator)">SQL 生成<span class="en">generator</span>
+      </div><div style="font-size:12px">🔍 第一层·选表：<b>customers、order_items、orders、products</b>
+      <div class="d" style="font-size:11.5px;color:#6b7280">任务要求统计指定商品（ID 2、4、6、7、8、10）各自的购买人数。购买人数需要从订单明细 order_items 中按 product_id 聚合，并关联 orders 主表以确定订单归属（去重统计下单客户数，需 orders.customer_id）。products 表用于校验/关联商品信息（商品 ID 与名称），虽核心聚合在 order_items，但为完整性与可能的商品维度过滤一并选上。customers 表在仅统计人数时非必需，但若需按客户去重口径确认，orders.customer_id 已足够，故未选 customers。</div>
+      <div class="d" style="font-size:11px;color:#9ca3af">候选：customers、order_items、orders、products</div></div><div style="display:flex;gap:7px;align-items:center;margin-bottom:2px">
+      <span class="risk r-只读">只读</span>
+      <span style="font-size:11.5px;color:#6b7280">SELECT · products、order_items、orders</span></div>
+      <pre class="sql">SELECT p.id AS product_id, p.name AS product_name, COUNT(DISTINCT o.customer_id) AS buyer_count FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id LEFT JOIN orders o ON o.id = oi.order_id AND o.status &lt;&gt; '已取消' WHERE p.id IN (2, 4, 6, 7, 8, 10) GROUP BY p.id, p.name ORDER BY p.id ASC LIMIT 100</pre><div style="font-size:11.5px;color:#6b7280">商品 ID 列表直接取自 st-1 已确认事实（2、4、6、7、8、10），不另设代理条件。购买人数口径：以 orders.customer_id 去重计数（COUNT(DISTINCT o.customer_id)），因为一个客户可能对同一商品下多张订单/多条明细，去重才等于“人数”。JOIN 链路：products.id = order_items.product_id 取到该商品的明细，再 order_items.order_id = orders.id 取到下单客户；orders 的 JOIN 条件里加 status &lt;&gt; '已取消' 排除已取消订单（取消订单不应计入购买）。用 LEFT JOIN 保证即使某商品无人购买也返回该商品行（计数为 0），满足“这 6 个商品各自”的完整性。GROUP BY p.id, p.name 按商品聚合，ORDER BY p.id 便于核对，LIMIT 100 兜底。</div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">生成 SQL（SELECT · 风险 只读）</div></div></div><div class="routebar "><span>
+        SQL 生成 → SQL 校验｜SQL 必须经过校验才能执行
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--validator)">校</div><div class="bubble">
+    <div class="who" style="color:var(--validator)">SQL 校验<span class="en">validator</span>
+      </div><div class="chk pass"><span class="mark">✓</span>
+      <span>静态防线（危险语句 / 多语句 / 表名授权）<div class="d">SELECT · 风险 只读</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>SQL 涉及的表必须在生成器选定的表之内<div class="d">只用了生成器选定的表：customers、order_items、orders、products</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>表和字段必须能在系统目录里对上（按表信息核对）<div class="d">表和字段都能在系统目录里对上（3 张表）</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>校验阶段不访问数据库<div class="d">表是否存在、语法与语义由执行器在执行时判定，本阶段不发任何语句</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>语句类型与安全性（只读、单语句、无注释/分号）<div class="d">单条 SELECT，无多语句、无注释、无分号结尾</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>表在授权范围内<div class="d">仅 products、order_items、orders，均在生成器选定表内</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>字段存在性<div class="d">products.id/name、order_items.product_id/order_id、orders.id/customer_id/status 均在目录中</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>JOIN 条件合理性<div class="d">oi.product_id = p.id 与 o.id = oi.order_id 均为正确外键链路；LEFT JOIN 保留零购买商品</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>聚合与 GROUP BY 配套<div class="d">COUNT(DISTINCT o.customer_id) 为聚合，p.id、p.name 均在 GROUP BY 中</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>WHERE 覆盖任务限定（6 个商品 ID）<div class="d">p.id IN (2,4,6,7,8,10) 精确覆盖</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>购买人数口径正确（排除已取消订单）<div class="d">o.status &lt;&gt; '已取消' 置于 LEFT JOIN ON 中，被排除订单的 customer_id 为 NULL，不计入 COUNT(DISTINCT)，口径正确</div></span></div><div class="chk pass"><span class="mark">✓</span>
+      <span>运行时确定性检查<div class="d">rt-static / rt-intent-tables / rt-catalog / rt-no-db 全部 pass</div></span></div><div class="verdict ok">✓ 校验通过
+      
+      <span class="why">SQL 只读、单语句，仅使用授权表 products/order_items/orders。字段均存在：products.id/name、order_items.product_id/order_id、orders.id/customer_id/status。JOIN 链路合理：products → order_items(product_id) → orders(id)，用 LEFT JOIN 保证无购买记录的商品也出现（buyer_count=0）。COUNT(DISTINCT o.customer_id) 统计购买人数，符合&quot;多少人购买&quot;的口径；GROUP BY p.id, p.name 与 SELECT 中非聚合列配套。WHERE p.id IN (2,4,6,7,8,10) 精确覆盖任务限定的 6 个商品。已取消订单通过 o.status &lt;&gt; '已取消' 排除，但该条件写在 LEFT JOIN 的 ON 中，被排除的订单其 o.customer_id 为 NULL，不会被 COUNT(DISTINCT) 计入，语义正确。ORDER BY p.id ASC、LIMIT 100 不影响结果正确性。运行时四项检查全部 pass，无更严格的反例。</span></div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">校验通过</div></div></div><div class="routebar "><span>
+        SQL 校验 → SQL 执行｜校验通过，可以执行
+        </span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--executor)">执</div><div class="bubble">
+    <div class="who" style="color:var(--executor)">SQL 执行<span class="en">executor</span>
+      </div><div class="affect">返回 <b>6</b> 行（4ms）</div><table class="grid"><thead><tr><th>product_id</th><th>product_name</th><th>buyer_count</th></tr></thead><tbody><tr><td>2</td><td>无线鼠标 M3</td><td>2</td></tr><tr><td>4</td><td>USB-C 扩展坞</td><td>0</td></tr><tr><td>6</td><td>降噪耳机 Air</td><td>1</td></tr><tr><td>7</td><td>移动硬盘 1T</td><td>1</td></tr><tr><td>8</td><td>机械臂显示器架</td><td>1</td></tr><tr><td>10</td><td>4K 摄像头</td><td>1</td></tr></tbody></table><div style="border-left:3px solid #0d9488;background:#f0fdfa;padding:6px 8px;border-radius:5px;margin:4px 0">
+      <div style="font-size:12px;font-weight:700;color:#0f766e">🧠 写入共享记忆
+        <span style="font-weight:400;color:#6b7280">· 只有真正执行过的才算事实</span></div>
+      <div style="font-size:12px;color:#334155;margin-top:2px">统计商品 ID 为 2、4、6、7、8、10 这 6 个商品各自的购买人数（去重客户数） —— 查询成功，返回 6 个目标商品各自的去重购买人数（含 0 人商品），行数与商品数一致。</div>
+      <div style="font-size:11.5px;color:#6b7280">
+        来源 sql_id=<b>—</b> · 6 行
+        <span style="color:#166534">· 已核对（执行器验证）</span></div><div style="font-size:11.5px;color:#0f766e;margin-top:2px">可复用实体：products.product_id =
+        2、4、6、7、8、10</div></div><div style="font-size:11.5px;color:#6b7280;margin-top:5px">查询成功，返回 6 个目标商品各自的去重购买人数（含 0 人商品），行数与商品数一致。</div></div></div><div class="routebar forced"><span>
+        SQL 执行 → 汇总审查｜3 个子任务全部完成，进入汇总
+        　· 护栏改道（模型原本想给 结束）</span></div><div class="msg agent  ">
+    <div class="avatar" style="background:var(--reviewer)">审</div><div class="bubble">
+    <div class="who" style="color:var(--reviewer)">汇总审查<span class="en">reviewer</span>
+      </div><details class="fold2" data-fold="180f196f-88e1-4751-8e2a-5c4fc3b61d83::reviewer::0::13::cons" >
+      <summary style="cursor:pointer;font-size:12px;color:#6b7280">运行时一致性校验 · 8 条全部通过</summary><div class="chk pass"><span class="mark">✓</span>
+        <span>每条 SQL 都要有意图说明并对应到子任务<div class="d">3 条 SQL 都带了意图说明</div></span></div><div class="chk pass"><span class="mark">✓</span>
+        <span>SQL 只能访问被授权的表<div class="d">SQL 只访问了被授权的表</div></span></div><div class="chk pass"><span class="mark">✓</span>
+        <span>SQL 必须经过校验才能执行<div class="d">所有执行过的 SQL 都经过校验</div></span></div><div class="chk pass"><span class="mark">✓</span>
+        <span>静态判定禁止的语句永远不能被执行<div class="d">没有任何禁止级语句被执行</div></span></div><div class="chk pass"><span class="mark">✓</span>
+        <span>需确认的操作必须有用户确认记录<div class="d">需确认的操作都有用户确认记录</div></span></div><div class="chk pass"><span class="mark">✓</span>
+        <span>执行过的 SQL 必须有结果留痕<div class="d">执行结果都落了账</div></span></div><div class="chk pass"><span class="mark">✓</span>
+        <span>每个子任务都要有对应的 SQL<div class="d">3 个子任务全部有 SQL 并执行</div></span></div><div class="chk pass"><span class="mark">✓</span>
+        <span>所有执行记录都要带幂等键<div class="d">所有执行记录都带幂等键</div></span></div></details><div class="verdict ok">✓ 通过
+      
+      <span class="why">运行时一致性校验报告 8 项全部 pass，无 fail，无需 veto。三个子任务均执行成功：st-1 查出 6 个库存&lt;6 的商品，st-2 将这 6 个商品库存更新为 15（受影响 6 行），st-3 基于同一批商品 ID 统计去重购买人数。数据完整、无编造、无被拒绝或取消的操作。</span></div><div class="md" style="margin-top:10px"><div class="md-p">已完成：库存小于 6 的商品共 <b>6 个</b>，已全部补货到 15，并统计了这 6 个商品各自的购买人数。</div><div class="md-p"><b>第一步：库存 &lt; 6 的商品（共 6 个）</b></div><table class="grid md"><thead><tr><th>商品 ID</th><th>名称</th><th>分类</th><th>单价</th><th>原库存</th></tr></thead><tbody><tr><td>2</td><td>无线鼠标 M3</td><td>外设</td><td>159.0</td><td>5</td></tr><tr><td>4</td><td>USB-C 扩展坞</td><td>外设</td><td>249.0</td><td>5</td></tr><tr><td>6</td><td>降噪耳机 Air</td><td>音频</td><td>899.0</td><td>5</td></tr><tr><td>7</td><td>移动硬盘 1T</td><td>存储</td><td>459.0</td><td>5</td></tr><tr><td>8</td><td>机械臂显示器架</td><td>显示</td><td>699.0</td><td>5</td></tr><tr><td>10</td><td>4K 摄像头</td><td>影音</td><td>599.0</td><td>5</td></tr></tbody></table><div class="md-p"><b>第二步：补货结果</b></div><div class="md-p">已将上述 6 个商品的库存统一更新为 15，<b>受影响行数 6 行</b>，与目标商品数一致：</div><table class="grid md"><thead><tr><th>商品 ID</th><th>名称</th><th>更新后库存</th></tr></thead><tbody><tr><td>2</td><td>无线鼠标 M3</td><td>15</td></tr><tr><td>4</td><td>USB-C 扩展坞</td><td>15</td></tr><tr><td>6</td><td>降噪耳机 Air</td><td>15</td></tr><tr><td>7</td><td>移动硬盘 1T</td><td>15</td></tr><tr><td>8</td><td>机械臂显示器架</td><td>15</td></tr><tr><td>10</td><td>4K 摄像头</td><td>15</td></tr></tbody></table><div class="md-p"><b>第三步：这 6 个商品的购买人数</b>（基于第一步确定的同一批商品 ID，按去重客户数统计，已排除「已取消」订单）</div><table class="grid md"><thead><tr><th>商品 ID</th><th>名称</th><th>购买人数</th></tr></thead><tbody><tr><td>2</td><td>无线鼠标 M3</td><td>2</td></tr><tr><td>4</td><td>USB-C 扩展坞</td><td>0</td></tr><tr><td>6</td><td>降噪耳机 Air</td><td>1</td></tr><tr><td>7</td><td>移动硬盘 1T</td><td>1</td></tr><tr><td>8</td><td>机械臂显示器架</td><td>1</td></tr><tr><td>10</td><td>4K 摄像头</td><td>1</td></tr></tbody></table><div class="md-p">说明：USB-C 扩展坞（ID 4）在有效订单中没有购买客户，购买人数为 0；其余 5 个商品合计购买人数为 6 人（按商品分别去重，同一客户购买多个商品会分别计入）。本次没有出现被拒绝或被取消的操作。</div></div></div></div><div class="msg sys"><div class="bubble" style="">完成 · 共 1 轮 · 审查通过，且运行时一致性校验全部 pass</div></div></div>
+</div>
+</body>
+</html>

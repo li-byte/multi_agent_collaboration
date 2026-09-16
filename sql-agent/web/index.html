@@ -256,6 +256,7 @@
     <button class="hbtn" id="btn-audit">🧾 SQL 审计</button>
     <button class="hbtn" id="btn-flow">🔀 数据流转</button>
     <button class="hbtn" id="btn-route">📊 时序图</button>
+    <button class="hbtn" id="btn-conv" title="把当前会话（含全部轮次）导出成一个独立网页">📄 导出会话</button>
   </div>
 </header>
 
@@ -281,7 +282,8 @@
   <div class="win">
     <div class="bar"><b id="info-title">详情</b><span class="hint" id="info-hint"></span>
       <div class="acts">
-        <button class="mini" id="info-export" style="display:none">导出 SVG</button>
+        <button class="mini" id="info-export" style="display:none">导出</button>
+        <button class="mini" id="info-export2" style="display:none">导出 SVG</button>
         <button class="mini" id="info-close">关闭 ✕</button>
       </div></div>
     <div class="win-body" id="info-body"></div>
@@ -360,10 +362,12 @@ const statusCN = (s) => STATUS_CN[s] || s || '—';
 const store = { chat:[], blocks:[], folds:{}, runId:null, runInfo:{}, events:[], tasks:[],
                 audit:[], awaiting:null, finished:false, es:null, infoMode:null,
                 rawAll:false, conversationId:null, curBlock:{}, blockSeq:0,
+                // 导出会话时置 true：同一套渲染，但去掉"要点击才成立"的东西
+                exporting:false,
                 // 消耗：本轮实时累加（来自 llm_call 事件）+ 打开面板时拉取的完整明细
                 usage:{ calls:0, prompt_tokens:0, completion_tokens:0, total_tokens:0,
                         cached_tokens:0, duration_ms:0, failed:0 },
-                usageDetail:null, usageAll:null };
+                usageDetail:null };
 
 /* ---------------- 事件 ---------------- */
 /* 气泡按「**一次节点调用**」分，不按角色分。
@@ -671,8 +675,13 @@ function renderItem(it, b) {
     (q.notes || []).forEach((n) => { h += `<div style="font-size:12px;color:#b45309">⚠ ${esc(n)}</div>`; });
     (q.cascade || []).forEach((n) => { h += `<div style="font-size:12px;color:#b45309">⚠ ${esc(n)}</div>`; });
     if (!it.done) {
-      h += `<div class="acts"><button class="btn ok" data-confirm="1">确认执行</button>
-        <button class="btn cancel" data-confirm="0">取消</button></div>`;
+      // 导出的记录里不产生按钮：那份 HTML 是给别人看的，不是给人点的
+      if (!store.exporting) {
+        h += `<div class="acts"><button class="btn ok" data-confirm="1">确认执行</button>
+          <button class="btn cancel" data-confirm="0">取消</button></div>`;
+      } else {
+        h += `<div style="margin-top:8px;font-weight:700;color:#6b7280">⏸ 当时在等用户确认</div>`;
+      }
     } else {
       h += `<div style="margin-top:8px;font-weight:700;color:${it.approve?'#166534':'#6b7280'}">
         ${it.approve ? '✓ 已确认执行' : '✕ 已取消'}（${esc(it.by || '')}）</div>`;
@@ -726,32 +735,36 @@ function renderBubble(b) {
     <div class="avatar" style="background:${a.color}">${a.face}</div><div class="bubble">
     <div class="who" style="color:${a.color}">${esc(a.cn)}<span class="en">${esc(b.role)}</span>
       ${b.round>0?`<span class="tag">第 ${b.round+1} 轮</span>`:''}</div>`;
-  if (!(b.items||[]).length && b.typing) {
+  if (!(b.items||[]).length && b.typing && !store.exporting) {
     h += `<div class="dots"><span></span><span></span><span></span>
       <span style="background:none;color:#94a3b8;font-size:12px;margin-left:4px">${esc(a.busy)}</span></div>`;
   } else {
     (b.items||[]).forEach((it) => { h += renderItem(it, b); });
-    if (b.typing) h += `<div class="dots" style="margin-top:5px"><span></span><span></span><span></span></div>`;
+    if (b.typing && !store.exporting) h += `<div class="dots" style="margin-top:5px"><span></span><span></span><span></span></div>`;
     else if (b.summary && b.role !== 'reviewer')
       h += `<div style="font-size:11.5px;color:#6b7280;margin-top:5px">${esc(b.summary)}</div>`;
+    /* 导出时如果这一轮还没跑完，气泡是空的 —— 与其留个空白，不如写明当时的状态 */
+    else if (store.exporting && !(b.items||[]).length)
+      h += `<div style="font-size:11.5px;color:#9ca3af;margin-top:5px">（导出时这一步还在进行中 · ${esc(a.busy)}）</div>`;
   }
   return h + `</div></div>`;
 }
 
-function renderChat() {
-  const box = $('chat');
+/* 对话流的 HTML 单独抽出来：**导出会话记录复用同一套渲染**，
+   否则导出的那份和界面看到的早晚会说两套话（改了一处忘了另一处）。 */
+function renderChatHtml() {
   if (!store.chat.length) {
-    box.innerHTML = `<div class="empty">
+    return `<div class="empty">
       用自然语言说你想对数据库做什么。<br>
       六个智能体会协作完成：规划 → 生成 SQL → 校验 → 执行，失败就自动修正。<br>
       删除操作会停下来等你确认；任何 DDL 一律拒绝。
     </div>`;
-    return;
   }
-  box.innerHTML = store.chat.map((it) => {
+  return store.chat.map((it) => {
     if (it.kind === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
     if (it.kind === 'sys') {
-      const extra = it.done ? `<div style="margin-top:8px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      // 导出的是"记录"，不是界面：这些入口点了才有意义，静态页里不产生
+      const extra = (it.done && !store.exporting) ? `<div style="margin-top:8px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
         <span class="opt" data-open="flow">数据流转</span>
         <span class="opt" data-open="usage">消耗清单</span>
         <span class="opt" data-open="audit">SQL 审计</span>
@@ -783,6 +796,8 @@ function renderChat() {
     return renderBubble(it);
   }).join('');
 }
+
+function renderChat() { $('chat').innerHTML = renderChatHtml(); }
 
 function render() { renderHeader(); renderChat(); if ($('info-overlay').classList.contains('open')) renderInfo(); }
 
@@ -819,7 +834,7 @@ function beginTurn() {
   store.chat.push({ kind:'turn' });
 }
 
-/** 本轮消耗清零（顶栏那个数字是「本轮」，全部累计在消耗清单面板里） */
+/** 本轮消耗清零（顶栏那个数字是「本轮」，消耗清单面板也是这一轮） */
 function resetUsage() {
   store.usage = { calls:0, prompt_tokens:0, completion_tokens:0, total_tokens:0,
                   cached_tokens:0, duration_ms:0, failed:0 };
@@ -855,7 +870,7 @@ function newSession() {
   store.audit = []; store.awaiting = null; store.finished = false;
   store.runId = null; store.runInfo = {}; store.conversationId = null;
   store.curBlock = {}; store.blockSeq = 0;
-  resetUsage(); store.usageAll = null;
+  resetUsage();
   render();
 }
 
@@ -979,26 +994,8 @@ function renderInfo() {
       h += `</tbody></table>`;
     }
 
-    const all = store.usageAll;
-    if (all) {
-      const at = all.total || {};
-      h += `<div class="use-sec">全部会话累计</div>
-        <div class="fi fi-dim" style="padding:0 2px">
-          ${fmtNum(at.calls || 0)} 次调用 · 输入 ${fmtNum(at.prompt_tokens || 0)} ·
-          输出 ${fmtNum(at.completion_tokens || 0)} · 合计 <b>${fmtNum(at.total_tokens || 0)}</b> token
-        </div>`;
-      const convs = all.by_conversation || [];
-      if (convs.length) {
-        h += `<table class="grid"><thead><tr><th>会话</th><th>轮次</th><th>调用</th>
-          <th>输入</th><th>输出</th><th>合计 token</th><th>最近</th></tr></thead><tbody>
-          ${convs.map((c) => `<tr><td>${esc(clip(c.question, 30))}</td>
-            <td>${esc(c.runs)}</td><td>${fmtNum(c.calls)}</td>
-            <td>${fmtNum(c.prompt_tokens)}</td><td>${fmtNum(c.completion_tokens)}</td>
-            <td><b>${fmtNum(c.total_tokens)}</b></td>
-            <td>${esc(shortTime(c.last_at))}</td></tr>`).join('')}
-        </tbody></table>`;
-      }
-    }
+    /* 这里刻意**不做**「全部会话累计」：消耗清单回答的是"这一轮花了多少"，
+       把别的会话的账混进来，会让这一轮的数字看起来对不上（也容易让人以为贵的是这次）。 */
     $('info-body').innerHTML = h;
     return;
   }
@@ -1457,32 +1454,409 @@ function renderSequence() {
   host.innerHTML = out.join('');
 }
 
-function exportSequence() {
-  const host = $('seq-canvas');
-  const svg = host && host.querySelector('svg');
-  if (!svg) { alert('还没有时序图可导出'); return; }
-  const clone = svg.cloneNode(true);
-  const vb = svg.getAttribute('viewBox').split(' ');
-  clone.setAttribute('width', vb[2]);
-  clone.setAttribute('height', vb[3]);
-  const blob = new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n` + clone.outerHTML],
-                        { type:'image/svg+xml;charset=utf-8' });
+/* ---------------- 导出（零依赖） ----------------
+   为什么不用现成库：
+   · html2canvas 之类要么引 CDN（离线就废、内网也拉不到），要么把 DOM 塞进 <foreignObject>
+     再栅格化 —— 而 foreignObject 在部分浏览器里直接画不出来，中文还容易缺字。
+   · 这里自己拼 SVG，只含 rect / text / line / marker。任何浏览器都能正确栅格化，
+     SVG 也是矢量，宽高由内容决定，不会像截图那样被面板宽度截断。
+   · 导出 HTML 只内联当前页面的 <style>，不引任何外部资源 —— 拷到别的机器、别的浏览器
+     直接双击打开就能看，不需要网络、不需要本服务在跑。 */
+
+function saveBlob(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = '协作时序图.svg';
+  a.download = name;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
+const SVG_FONT = 'Microsoft YaHei, PingFang SC, Segoe UI, sans-serif';
+/** SVG 里的文本同样要转义（表名、SQL、错误原话都可能带 & < "） */
+const svgEsc = (s) => esc(s);
+
+/** 估宽：CJK 按 1 em、其余按 0.55 em。只为排版定列宽，不追求精确字距 */
+function tw(s, size) {
+  let w = 0;
+  for (const ch of String(s ?? '')) w += (ch.codePointAt(0) > 0x2e80 ? size : size * 0.55);
+  return w;
+}
+/** 截断到指定宽度 —— 宁可加省略号，也不让文字压到下一列 */
+function fitText(s, size, maxW) {
+  s = String(s ?? '');
+  if (tw(s, size) <= maxW) return s;
+  let out = '';
+  for (const ch of s) {
+    if (tw(out + ch + '…', size) > maxW) break;
+    out += ch;
+  }
+  return out + '…';
+}
+
+/**
+ * 画一张表。cols: [{t, v, v2?, align?, bold?, fill?, svg?}]
+ * 返回 {svg, w, h}：内容以 (0,0) 为左上角，由调用方决定摆在哪。
+ * 列宽取「表头与所有单元格所需宽度的最大值」—— 所以不会截断，表宽由内容决定。
+ */
+function svgTable(cols, rows) {
+  const FS = 11.5, PAD = 9, ROW = 25, HEAD = 27;
+  const w = cols.map((c) => {
+    let m = tw(c.t, FS);
+    rows.forEach((r) => { m = Math.max(m, tw(c.v(r), FS)); });
+    /* 第二行（失败调用的错误原话）也参与定宽，但**有上限**：一条长报错不该把整张表撑爆。
+       上限之外交给 fitText 截断 —— 至少让人看见开头最关键的那截，而不是整条丢掉。 */
+    if (c.v2) {
+      let m2 = 0;
+      rows.forEach((r) => { const s2 = c.v2(r); if (s2) m2 = Math.max(m2, tw(s2, 10.5)); });
+      m = Math.max(m, Math.min(m2, c.v2Max || 460));
+    }
+    return Math.ceil(m + PAD * 2);
+  });
+  const total = w.reduce((a, b) => a + b, 0);
+  const o = [`<rect x="0" y="0" width="${total}" height="${HEAD}" rx="6" fill="#eef2f7"/>`];
+  let x = 0;
+  cols.forEach((c, i) => {
+    const right = c.align === 'right';
+    const tx = right ? x + w[i] - PAD : x + PAD;
+    o.push(`<text x="${tx}" y="18" text-anchor="${right ? 'end' : 'start'}" font-size="${FS}" font-weight="700" fill="#475569">${svgEsc(c.t)}</text>`);
+    x += w[i];
+  });
+  let y = HEAD;
+  rows.forEach((r, ri) => {
+    const twoLine = cols.some((c) => c.v2 && c.v2(r));
+    const h = twoLine ? 40 : ROW;
+    if (ri % 2) o.push(`<rect x="0" y="${y}" width="${total}" height="${h}" fill="#fafbfc"/>`);
+    let cx = 0;
+    cols.forEach((c, i) => {
+      if (c.svg) { o.push(c.svg(r, cx, y, w[i], h)); cx += w[i]; return; }
+      const right = c.align === 'right';
+      const tx = right ? cx + w[i] - PAD : cx + PAD;
+      const anchor = right ? 'end' : 'start';
+      const base = y + (twoLine ? 16 : 17);
+      const fill = c.fill ? c.fill(r) : '#1f2937';
+      const weight = c.bold && c.bold(r) ? ' font-weight="700"' : '';
+      o.push(`<text x="${tx}" y="${base}" text-anchor="${anchor}" font-size="${FS}" fill="${fill}"${weight}>${svgEsc(fitText(c.v(r), FS, w[i] - PAD * 2))}</text>`);
+      if (c.v2) {
+        const s2 = c.v2(r);
+        if (s2) o.push(`<text x="${tx}" y="${base + 15}" text-anchor="${anchor}" font-size="10.5" fill="#dc2626">${svgEsc(fitText(s2, 10.5, w[i] - PAD * 2))}</text>`);
+      }
+      cx += w[i];
+    });
+    y += h;
+  });
+  o.push(`<line x1="0" y1="${y}" x2="${total}" y2="${y}" stroke="#e5e7eb"/>`);
+  return { svg: o.join(''), w: total, h: y };
+}
+
+function svgSection(label, tbl, x, y) {
+  const o = [];
+  if (label) {
+    o.push(`<text x="${x}" y="${y + 13}" font-size="12" font-weight="700" fill="#334155">${svgEsc(label)}</text>`);
+    y += 26;
+  }
+  o.push(`<g transform="translate(${x},${y})">${tbl.svg}</g>`);
+  return { svg: o.join(''), y: y + tbl.h + 20 };
+}
+
+/** 消耗清单的 PNG：把面板上那几块（四张卡 + 三张表）重画成一张 SVG 报表 */
+function buildUsageSvg(d) {
+  const t = d.total || {};
+  const calls = d.calls || [];
+  const byRole = d.by_role || [];
+  const byStage = d.by_stage || [];
+  const rate = (t.prompt_tokens || 0) > 0
+    ? Math.round((t.cached_tokens || 0) / t.prompt_tokens * 100) : 0;
+  const PAD = 26;
+
+  const grand = t.total_tokens || 1;
+  const roleT = byRole.length ? svgTable([
+    { t:'智能体', v:(r) => `${A(r.role).cn}  ${r.role}` },
+    { t:'调用', v:(r) => fmtNum(r.calls), align:'right' },
+    { t:'输入', v:(r) => fmtNum(r.prompt_tokens), align:'right' },
+    { t:'输出', v:(r) => fmtNum(r.completion_tokens), align:'right' },
+    { t:'合计', v:(r) => fmtNum(r.total_tokens), align:'right', bold:() => true },
+    { t:'占比', v:() => '100%',
+      svg:(r, x, y, w) => {
+        const p = Math.round((r.total_tokens || 0) / grand * 100);
+        const bw = w - 18, fill = Math.max(0, Math.min(bw, bw * p / 100));
+        return `<rect x="${x + 4}" y="${y + 8}" width="${bw}" height="9" rx="4.5" fill="#e5e7eb"/>`
+             + `<rect x="${x + 4}" y="${y + 8}" width="${fill}" height="9" rx="4.5" fill="#2563eb"/>`
+             + `<text x="${x + 4 + bw}" y="${y + 17}" text-anchor="end" font-size="10.5" fill="#6b7280">${p}%</text>`;
+      } },
+    { t:'耗时', v:(r) => `${((r.duration_ms || 0) / 1000).toFixed(1)}s`, align:'right' },
+  ], byRole) : null;
+
+  const stageT = byStage.length ? svgTable([
+    { t:'智能体', v:(s) => A(s.role).cn },
+    { t:'这一步在干什么', v:(s) => s.stage || '—' },
+    { t:'调用', v:(s) => fmtNum(s.calls), align:'right' },
+    { t:'合计 token', v:(s) => fmtNum(s.total_tokens), align:'right', bold:() => true },
+  ], byStage) : null;
+
+  const callT = calls.length ? svgTable([
+    { t:'#', v:(c) => c.call_id },
+    { t:'智能体', v:(c) => A(c.role).cn },
+    { t:'在干什么', v:(c) => (c.stage || '—') + (c.attempt > 1 ? `（第 ${c.attempt} 次重试）` : ''),
+      v2:(c) => c.error || '', fill:(c) => (c.ok === false ? '#dc2626' : '#1f2937') },
+    { t:'轮/子任务', v:(c) => `第 ${(c.round ?? 0) + 1} 轮 · c${c.cursor ?? 0}` },
+    { t:'模型', v:(c) => c.model || '—' },
+    { t:'输入', v:(c) => fmtNum(c.prompt_tokens), align:'right' },
+    { t:'输出', v:(c) => fmtNum(c.completion_tokens), align:'right' },
+    { t:'合计', v:(c) => fmtNum(c.total_tokens), align:'right', bold:() => true },
+    { t:'缓存命中', v:(c) => fmtNum(c.cached_tokens), align:'right' },
+    { t:'耗时', v:(c) => (c.duration_ms != null ? (c.duration_ms / 1000).toFixed(1) + 's' : '—'), align:'right' },
+  ], calls) : null;
+
+  // 画布宽度跟着最宽的那张表走 —— 表就不会被压扁、也不会被截断
+  const contentW = Math.max(roleT ? roleT.w : 0, stageT ? stageT.w : 0,
+                            callT ? callT.w : 0, 1120);
+  const W = contentW + PAD * 2;
+  const o = [];
+  const TITLE_Y = 46;
+  o.push(`<text x="${PAD}" y="${TITLE_Y}" font-size="19" font-weight="700" fill="#0f172a">大模型消耗清单</text>`);
+  const sub = `每次调用的 token 用量（取自模型响应，不估算） · 模型 ${d.model || '—'} · 存在 agent_sql.llm_call`;
+  o.push(`<text x="${PAD}" y="${TITLE_Y + 23}" font-size="11.5" fill="#6b7280">${svgEsc(sub)}</text>`);
+  let y = TITLE_Y + 23 + 26;
+
+  if (!calls.length) {
+    const lines = d.llm_enabled
+      ? ['这一轮没有消耗记录 —— 要么它没有调用过大模型，',
+         '要么这次运行发生在「消耗统计」上线之前（老记录补不回来，重新跑一轮就有明细）。']
+      : [`当前是 LLM_MODE=${d.llm_mode || 'mock'}：这一轮没有调用大模型，所以没有消耗 ——`,
+         '不是"用了 0 token"，是根本没发请求。'];
+    lines.forEach((ln, i) => o.push(`<text x="${PAD}" y="${y + 18 + i * 20}" font-size="12.5" fill="#475569">${svgEsc(ln)}</text>`));
+    y += 18 + lines.length * 20;
+  } else {
+    // 四张卡
+    const cards = [
+      ['调用次数', fmtNum(t.calls || 0), t.failed ? `${t.failed} 次失败也占了输入 token` : '全部成功', '#2563eb'],
+      ['输入 token', fmtNum(t.prompt_tokens || 0), `其中缓存命中 ${fmtNum(t.cached_tokens || 0)}（${rate}%）`, '#0891b2'],
+      ['输出 token', fmtNum(t.completion_tokens || 0), '模型生成的部分', '#7c3aed'],
+      ['合计 token', fmtNum(t.total_tokens || 0), `累计耗时 ${((t.duration_ms || 0) / 1000).toFixed(1)}s`, '#16a34a'],
+    ];
+    const gap = 12, cw = Math.floor((W - PAD * 2 - gap * 3) / 4), ch = 78;
+    cards.forEach((c, i) => {
+      const cx = PAD + i * (cw + gap);
+      o.push(`<rect x="${cx}" y="${y}" width="${cw}" height="${ch}" rx="10" fill="#fff" stroke="#e5e7eb"/>`);
+      o.push(`<rect x="${cx}" y="${y}" width="4" height="${ch}" rx="2" fill="${c[3]}"/>`);
+      o.push(`<text x="${cx + 16}" y="${y + 22}" font-size="11.5" fill="#6b7280">${svgEsc(c[0])}</text>`);
+      o.push(`<text x="${cx + 16}" y="${y + 50}" font-size="20" font-weight="700" fill="#0f172a">${svgEsc(c[1])}</text>`);
+      o.push(`<text x="${cx + 16}" y="${y + 68}" font-size="10.5" fill="#9ca3af">${svgEsc(fitText(c[2], 10.5, cw - 28))}</text>`);
+    });
+    y += ch + 24;
+
+    if (roleT) { const s = svgSection('按智能体', roleT, PAD, y); o.push(s.svg); y = s.y; }
+    if (stageT) { const s = svgSection('按步骤（同一个智能体内部也分开看）', stageT, PAD, y); o.push(s.svg); y = s.y; }
+    const s = svgSection(`调用明细（${calls.length} 次，按发生顺序）`, callT, PAD, y);
+    o.push(s.svg); y = s.y + 4;
+  }
+
+  const H = y + 26;
+  o.push(`<text x="${PAD}" y="${H - 8}" font-size="10.5" fill="#9ca3af">导出时间 ${svgEsc(new Date().toLocaleString('zh-CN'))} · 由 sql-agent 消耗清单视图导出</text>`);
+  return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${SVG_FONT}">`
+              + `<rect width="${W}" height="${H}" fill="#ffffff"/>` + o.join('') + `</svg>`, w: W, h: H };
+}
+
+/** SVG 字符串 → PNG。走 data: URL，不依赖任何库，也不会把 canvas 判成跨源 */
+async function pngFromSvg(svgText, w, h, name, scale) {
+  scale = scale || 2;                     // 2 倍：放进 PPT / 文档不糊
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+  const img = new Image();
+  await new Promise((res, rej) => {
+    img.onload = res;
+    img.onerror = () => rej(new Error('浏览器没能把 SVG 画成图片'));
+    img.src = url;
+  });
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(w * scale));
+  cv.height = Math.max(1, Math.round(h * scale));
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, cv.width, cv.height);
+  g.drawImage(img, 0, 0, cv.width, cv.height);
+  const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
+  if (!blob) throw new Error('canvas 导出失败');
+  saveBlob(blob, name);
+}
+
+function seqSvg() {
+  const host = $('seq-canvas');
+  const svg = host && host.querySelector('svg');
+  if (!svg) return null;
+  const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+  const w = vb[2] || svg.clientWidth || 1240;
+  const h = vb[3] || svg.clientHeight || 600;
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', w);
+  clone.setAttribute('height', h);
+  return { text: new XMLSerializer().serializeToString(clone), w, h };
+}
+
+/** 时序图：PNG（默认按钮） */
+async function exportSequencePng() {
+  const s = seqSvg();
+  if (!s) { alert('还没有时序图可导出'); return; }
+  try {
+    await pngFromSvg(s.text, s.w, s.h, '协作时序图.png');
+  } catch (e) {
+    alert('PNG 导出失败：' + (e && e.message ? e.message : e) + '\n已改为导出 SVG。');
+    exportSequenceSvg();
+  }
+}
+
+/** 时序图：SVG（要放进 PPT 随手缩放就用这个） */
+function exportSequenceSvg() {
+  const s = seqSvg();
+  if (!s) { alert('还没有时序图可导出'); return; }
+  saveBlob(new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n` + s.text],
+                    { type:'image/svg+xml;charset=utf-8' }), '协作时序图.svg');
+}
+
+/** 消耗清单：PNG */
+async function exportUsagePng() {
+  const d = store.usageDetail;
+  if (!d) { alert('还没有消耗数据可导出'); return; }
+  try {
+    const r = buildUsageSvg(d);
+    await pngFromSvg(r.svg, r.w, r.h, '大模型消耗清单.png');
+  } catch (e) {
+    alert('PNG 导出失败：' + (e && e.message ? e.message : e));
+  }
+}
+
+/** 数据流转链路：一个自包含的 HTML（样式内联，无外部依赖，换台机器双击就能看） */
+function exportFlowHtml() {
+  if (!store.events.length) { alert('还没有流转记录可导出'); return; }
+  // 导出的这份要带上「真实传递过去的内容·完整结构」——静态 HTML 里没有那个展开按钮，
+  // 所以导出时强制展开，否则最能说明问题的部分反而被折叠掉了。
+  const prev = store.rawAll;
+  store.rawAll = true;
+  let body;
+  try { body = renderFlow(); } finally { store.rawAll = prev; }
+
+  const css = Array.from(document.querySelectorAll('style')).map((s) => s.textContent).join('\n');
+  const q = ((store.events.find((e) => e.event_type === 'run_created') || {}).payload || {}).question
+          || (store.chat.find((i) => i.kind === 'user') || {}).text || '';
+  // 页面本身是「固定视口 + 覆盖层」布局，导出页要变成可滚动的长文档 —— 这几条必须放在最后覆盖
+  const override = `
+  html, body { height:auto !important; overflow:auto !important; }
+  body { padding:18px 16px 44px; background:#f5f7fa; }
+  .exp-wrap { max-width:1400px; margin:0 auto; }
+  .exp-hd { margin:0 4px 12px; }
+  .exp-hd h1 { font-size:16px; margin:0 0 4px; }
+  .exp-hd .m { font-size:11.5px; color:#6b7280; line-height:1.7; }
+  .exp-hd .m code { background:#eef2f7; border-radius:3px; padding:0 4px; }
+  .flow-bar .opt { display:none !important; }   /* 那个开关要 JS，静态页里没意义 */
+`;
+  const head = '<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+    + '<title>数据流转链路 · sql-agent</title>\n<style>\n';
+  const hd = '<div class="exp-wrap">\n<div class="exp-hd">\n'
+    + '<h1>🔀 数据流转链路</h1>\n'
+    + '<div class="m">问题：' + esc(q) + '<br>'
+    + '导出时间 ' + esc(new Date().toLocaleString('zh-CN'))
+    + ' · 共 ' + store.events.length + ' 条事件 · 数据来自 <code>agent_sql.agent_event</code>，可逐条回放<br>'
+    + '本文件样式已内联，不依赖任何外部资源（不用连网、不用起服务），双击即可打开。</div>\n</div>\n';
+  const html = head + css + override + '</style>\n</head>\n<body>\n' + hd + body + '\n</div>\n</body>\n</html>\n';
+  saveBlob(new Blob([html], { type:'text/html;charset=utf-8' }), '数据流转链路.html');
+}
+
+/** 会话标题要进文件名，先把路径/保留字符换掉 */
+function fileSafe(s, n) {
+  const t = String(s ?? '').replace(/[\\/:*?"<>|\r\n\t]+/g, ' ')
+                        .replace(/\s+/g, ' ').trim();
+  return (t || '会话记录').slice(0, n || 24);
+}
+
+/** 会话记录 → **自包含**单文件 HTML（口径与「数据流转」导出的那份完全一致） */
+async function exportConversationHtml() {
+  if (!store.chat.length) { alert('还没有对话可导出 —— 先问一句，或从左边点开一个会话。'); return; }
+
+  // 汇总行取自会话列表接口（一个会话一条）：状态 / 改了什么数据 / 轮次 / 消耗。
+  // 拿不到就不写这一行 —— 导出正文不受影响，但不能为了它让整个导出失败。
+  let summary = '';
+  if (store.conversationId) {
+    try {
+      const rows = await (await fetch('/api/runs')).json();
+      const row = (rows || []).find((r) => r.conv_id === store.conversationId);
+      if (row) {
+        summary = [`<b>${esc(statusCN(row.status))}</b>`, sessImpact(row),
+                   row.turns > 1 ? `${row.turns} 轮对话` : '单轮',
+                   row.llm_calls ? `💸 ${row.llm_calls} 次 · ${fmtNum(row.llm_tokens)} tok` : '']
+                  .filter(Boolean).join(' · ');
+      }
+    } catch (e) { /* 忽略：汇总只是页眉的一行注脚 */ }
+  }
+
+  const first = (store.chat.find((i) => i.kind === 'user') || {}).text || '会话记录';
+  // 复用对话流那一套渲染 —— 导出与界面看到的必须是同一份内容，
+  // 只是把"要点击才成立"的控件去掉（确认按钮 / 打开其它视图的入口 / 等待动画）。
+  const prev = store.exporting;
+  store.exporting = true;
+  let body;
+  try { body = renderChatHtml(); } finally { store.exporting = prev; }
+
+  const css = Array.from(document.querySelectorAll('style')).map((s) => s.textContent).join('\n');
+  // 页面本身是「固定视口 + 侧栏 + 覆盖层」布局，导出页要变成一份可滚动、可打印的长文档
+  const override = `
+  html, body { height:auto !important; overflow:auto !important; }
+  body { padding:20px 16px 48px; background:#f5f7fa; }
+  .exp-wrap { max-width:1040px; margin:0 auto; }
+  .exp-hd { margin:0 4px 16px; }
+  .exp-hd h1 { font-size:16px; margin:0 0 6px; }
+  .exp-hd .m { font-size:11.5px; color:#6b7280; line-height:1.85; }
+  .exp-hd .m code { background:#eef2f7; border-radius:3px; padding:0 4px; }
+  .exp-chat { padding:0; max-width:none; }
+  /* 页眉那行「改了什么数据」的徽标：原样式是挂在侧栏 .sess 下的，这里补一份 */
+  .imp { display:inline-block; border-radius:999px; padding:0 7px; font-size:11px; font-weight:600; }
+  .imp.write { background:#fef3c7; color:#92400e; }
+  .imp.read  { background:#dbeafe; color:#1d4ed8; }
+  .imp.wait  { background:#ffedd5; color:#9a3412; }
+  .imp.none  { background:#f3f4f6; color:#6b7280; }
+  .imp.bad   { background:#fee2e2; color:#991b1b; }
+  /* 兜底：静态页里没有任何可点的东西，也没有"正在输入" */
+  [data-confirm], [data-open], .dots { display:none !important; }
+  @media print { body { background:#fff; } .bubble, .hop { break-inside:avoid; } }
+`;
+  const head = '<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+    + '<title>会话记录 · ' + esc(clip(first, 40)) + '</title>\n<style>\n';
+  const hd = '<div class="exp-wrap">\n<div class="exp-hd">\n'
+    + '<h1>📄 会话记录</h1>\n'
+    + '<div class="m">问题：' + esc(clip(first, 100)) + '<br>'
+    + (summary ? summary + '<br>' : '')
+    + '导出时间 ' + esc(new Date().toLocaleString('zh-CN'))
+    + ' · 数据来自 <code>agent_sql</code>（agent_run / agent_event / sql_audit），可逐条回放<br>'
+    + '本文件样式已内联，不依赖任何外部资源：不用连网、不用起服务，双击即可打开。</div>\n</div>\n';
+  const html = head + css + override + '</style>\n</head>\n<body>\n'
+    + hd + '<div class="chat exp-chat">' + body + '</div>\n</div>\n</body>\n</html>\n';
+  saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }),
+           `会话记录-${fileSafe(first)}.html`);
+}
+
+/** 当前视图的主导出动作（按钮文案在 openInfo 里按视图设置） */
+function exportCurrent() {
+  if (store.infoMode === 'usage') return exportUsagePng();
+  if (store.infoMode === 'seq') return exportSequencePng();
+  if (store.infoMode === 'flow') return exportFlowHtml();
 }
 
 async function openInfo(mode) {
   store.infoMode = mode;
   $('info-overlay').classList.add('open');
-  $('info-export').style.display = (mode === 'seq') ? '' : 'none';
+  // 导出按钮随视图变：能用什么格式导出，就在按钮上直接写清楚
+  const EXPORT_BTN = { usage:['导出 PNG', null], seq:['导出 PNG', '导出 SVG'],
+                       flow:['导出 HTML', null] };
+  const [b1, b2] = EXPORT_BTN[mode] || [null, null];
+  $('info-export').style.display = b1 ? '' : 'none';
+  if (b1) $('info-export').textContent = b1;
+  $('info-export2').style.display = b2 ? '' : 'none';
+  if (b2) $('info-export2').textContent = b2;
   if (mode === 'usage') {
     renderInfo();                                   // 先渲染「加载中」
-    if (!store.usageAll) {
-      try { store.usageAll = await (await fetch('/api/usage')).json(); } catch (e) {}
-    }
     if (!store.usageDetail && store.runId) {
       try {
         store.usageDetail = await (await fetch(`/api/runs/${store.runId}/usage`)).json();
@@ -1504,6 +1878,7 @@ $('btn-usage').onclick = () => openInfo('usage');
 $('btn-audit').onclick = () => openInfo('audit');
 $('btn-flow').onclick = () => openInfo('flow');
 $('btn-route').onclick = () => openInfo('seq');
+$('btn-conv').onclick = exportConversationHtml;   // 整个会话（含全部轮次）→ 独立网页
 // 「展开/收起全部原始结构」—— 内容是重新渲染的，所以用事件委托
 $('info-body').addEventListener('click', (ev) => {
   if (ev.target && ev.target.id === 'flow-raw-toggle') {
@@ -1511,7 +1886,8 @@ $('info-body').addEventListener('click', (ev) => {
     renderInfo();
   }
 });
-$('info-export').onclick = exportSequence;
+$('info-export').onclick = exportCurrent;        // 消耗清单→PNG · 时序图→PNG · 数据流转→HTML
+$('info-export2').onclick = exportSequenceSvg;   // 时序图的矢量版（放 PPT 随意缩放）
 $('info-close').onclick = closeInfo;
 $('info-overlay').onclick = (ev) => { if (ev.target === $('info-overlay')) closeInfo(); };
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeInfo(); });
