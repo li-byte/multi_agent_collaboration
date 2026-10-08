@@ -1,4 +1,0 @@
-内联 script 块：1 个（来源 index.html）
-  ✓ 块 1｜77510 字符｜首行：const $ = (id) => document.getElementById(id);
-
-✓ 前端内联 JS 语法全部通过
