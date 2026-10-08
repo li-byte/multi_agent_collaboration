@@ -331,7 +331,7 @@ class Reliability(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("全部商品", mem["claim"])
         self.assertTrue(mem["truncated"])
         self.assertTrue(mem["sampled"])
-        self.assertEqual(mem["interpretation"], "这是全部商品")
+        self.assertEqual(mem["interpretation"], "")
         self.assertFalse(mem["interpretation_verified"])
 
     async def test_no_checkpoint_finish_uses_stream_values(self):

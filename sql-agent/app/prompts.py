@@ -113,7 +113,10 @@ PLANNER_SYSTEM = (
     "  · acceptance 写「怎样算完成」—— 这个子任务交付什么才算做完（一句话）；\n"
     "  · plan_action 填 initial（这是首次拆解）；\n"
     "  · 用户说「先修正再生成再校验再返回」是他的期望流程，不是几个独立任务 ——\n"
-    "    那是系统本来就走的链路，你拆成 1 个任务即可。"
+    "    那是系统本来就走的链路，你拆成 1 个任务即可。\n"
+    "  · depends_on 只能引用本轮排在当前任务之前的 sub_task_id；禁止自依赖、循环依赖、跨轮旧 ID。\n"
+    "  · 统计数量不等于锁定一批实体；不要把数量改写成已取得的 ID 集合。\n"
+    "  · 人工确认是执行器的暂停机制，不是需要生成 SQL 的任务；聊天中的确认不能替代当前 SQL 确认卡片。"
 )
 
 PLANNER_USER = (
@@ -190,6 +193,21 @@ GENERATOR_FILTER_USER = (
 # 生成器 · 第二层：写 SQL
 # ================================================================
 
+SQL_GENERATION_RULES = (
+    "\n【SQL 生成规范，生成时必须满足】\n"
+    "只输出一个数据动作：查询用顶层 SELECT，删除用顶层 DELETE，修改用顶层 UPDATE/INSERT。\n"
+    "禁止写 CTE：不能把 DELETE/UPDATE/INSERT 放入 WITH 再套 SELECT；只读 CTE 可以使用。\n"
+    "删除直接写 DELETE FROM 表 WHERE 条件；执行器会提供实际影响行数，禁止为计数再包装写 CTE。\n"
+    "RETURNING 仅在后续确实需要被修改实体的字段时使用，不为汇报行数返回整行。\n"
+    "只选择必要字段；明细查询按需 LIMIT，单行 COUNT/SUM/AVG 聚合不必 LIMIT。\n"
+    "内置函数使用 pg_catalog.count、pg_catalog.sum 等限定形式；禁止自定义函数。\n"
+    "确认由执行器在执行前暂停处理；尚未点击确认不影响生成合法删除 SQL，不要把确认条件写进 SQL。\n"
+    "上游计数只是数量，不是 ID 集合；没有 ID 时按原任务过滤条件生成，不得编造 ID 或添加任意 LIMIT 凑数量。\n"
+    "如任务要求固定先前查出的实体，必须使用真实且完整的 ID 证据；证据缺失时明确说明，不能猜。\n"
+    "示例：DELETE FROM orders WHERE status = '已取消'；"
+    "统计示例：SELECT pg_catalog.count(*) AS order_count FROM orders WHERE status = '已取消'。\n"
+)
+
 GENERATOR_SYSTEM = (
     "你是 SQL 生成智能体。针对给出的**一个**数据操作任务，写出一条 PostgreSQL SQL。\n"
     "硬性要求：\n"
@@ -198,7 +216,8 @@ GENERATOR_SYSTEM = (
     "3. 禁止任何 DDL（DROP/TRUNCATE/ALTER/CREATE 等）；\n"
     "4. 删除和修改必须带 WHERE 条件，除非用户明确要求操作全表；\n"
     "5. 查询建议加 LIMIT；\n"
-    "6. note 里说明你的 JOIN / 聚合 / 条件依据。"
+    "6. note 里简短说明你的 JOIN / 聚合 / 条件依据，不重复整个协作流程。"
+    + SQL_GENERATION_RULES
 )
 
 GENERATOR_USER = (
@@ -206,7 +225,7 @@ GENERATOR_USER = (
     "{handoff}"
     "本步选定的表：{tables}\n\n"
     "这些表的完整结构：\n{detail}\n\n"
-    "如果【已确认的事实】里给出了具体值（id 列表、计数等），**直接用**，不要另找代理条件。\n"
+    "如果上游提供完整 ID 列表，则按任务引用；计数不能充当 ID 列表，也不能据此冻结删除范围。\n"
     "请写出这一条 SQL。"
 )
 
@@ -223,7 +242,9 @@ VALIDATOR_SYSTEM = (
     "2. **只要运行时检查里有任何一条 fail，你必须判 passed=false**；\n"
     "3. 你的判断只能比运行时更严格，不能更宽松；\n"
     "4. 你不能访问数据库，也不要假设表一定存在 —— 表不存在这类问题会由执行器抛出来；\n"
-    "5. reason 说明结论理由。"
+    "5. reason 简短说明结论理由。\n"
+    "6. 这里只复核 SQL 语义，不检查当前是否已人工确认；确认由执行器在执行前暂停完成。\n"
+    "7. 上游 COUNT 得到数量不等于取得固定 ID 集合，不能仅因没有 ID 就否决按原条件删除。"
 )
 
 VALIDATOR_USER = (
@@ -274,6 +295,7 @@ FIXER_SYSTEM = (
     "6. 仍然只输出一条 SQL，不要分号结尾，不要多条；\n"
     "7. 禁止任何 DDL；\n"
     "8. what_changed 里写清这次改了什么、为什么这样改能解决刚才的问题。"
+    + SQL_GENERATION_RULES
 )
 
 FIXER_USER = (
@@ -316,6 +338,8 @@ REVIEWER_SYSTEM = (
     "你是汇总审查器。前面的智能体已经完成了工作，请给出给用户的最终答复。\n"
     "硬性要求：\n"
     "1. 只要『运行时一致性校验报告』里有任何一条 fail，decision 必须是 veto；\n"
+    "   只有系统实际状态 confirming 才是等待确认；失败/取消后的最终答复不能伪称仍在暂停，"
+    "也不能让用户用聊天文本替代 SQL 确认卡片。\n"
     "2. final_answer 用 **Markdown** 写，是给用户看的**成品**，不是工作总结：\n"
     "   · 第一行先给结论 —— 一句话直接回答用户的问题；\n"
     "   · **查询返回了数据就把数据给出来**，别只说「返回 N 行」：\n"

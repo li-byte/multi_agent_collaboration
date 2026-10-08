@@ -417,7 +417,13 @@ def analyze(sql: str, allowed_tables: set[str] | None = None) -> SqlVerdict:
     else:
         level = "写入"
 
-    if action == "SELECT" and not re.search(r"\blimit\b", flat, re.I):
+    scalar_aggregate = (isinstance(root, ast.SelectStmt) and not root.groupClause
+                        and not root.windowClause and root.op.name == "SETOP_NONE"
+                        and bool(root.targetList)
+                        and all(isinstance(t.val, ast.FuncCall) and not t.val.over
+                                and t.val.funcname[-1].sval in {"count", "sum", "avg", "min", "max"}
+                                for t in root.targetList))
+    if action == "SELECT" and not scalar_aggregate and not re.search(r"\blimit\b", flat, re.I):
         notes.append("没有 LIMIT，结果会被系统截断到上限行数")
 
     normalized = single

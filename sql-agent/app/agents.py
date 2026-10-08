@@ -943,7 +943,7 @@ async def executor(state, rt) -> dict:
             "rowcount": exec_result.get("rowcount"),
             "truncated": bool(exec_result.get("truncated")),
             "sampled": len(exec_result.get("rows") or []) > 50,
-            "interpretation": out.summary or "",
+            "interpretation": "",
             "interpretation_verified": False,
         }
         await rt.ledger.save_memory(
@@ -980,7 +980,7 @@ async def executor(state, rt) -> dict:
     cursor_now = int(state.get("cursor", 0))
     next_cursor = min(cursor_now + 1, len(intents)) if exec_result["ok"] else cursor_now
 
-    return {"result": {**exec_result, "model_summary": out.summary,
+    return {"result": {**exec_result, "model_summary": "",
                        "error_hint": out.error_hint},
             "explain": explain,
             "confirmed": bool(state.get("confirmed")),
@@ -1126,6 +1126,7 @@ async def reviewer(state, rt) -> dict:
                     if (state.get("verdict") or {}).get("level") == "禁止" else "")
     system = prompts.REVIEWER_SYSTEM.format(mode_rule=mode_rule, blocked_rule=blocked_rule)
     plan_brief = {"understanding": state.get("understanding"),
+                  "运行状态": state.get("status"),
                   "refusal": state.get("refusal"),
                   "mode": mode,
                   "safety": state.get("safety"),

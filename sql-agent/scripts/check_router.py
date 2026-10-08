@@ -108,7 +108,7 @@ CASES: list[tuple[str, dict, str]] = [
     # ---------- 复查循环（后面的计划要按前面**实际结果**评估）----------
     ("做完一个子任务、后面还有 → 先回规划器复查",
      st(draft=DRAFT, verdict={"level": "只读"}, checks={"passed": True}, result={"ok": True},
-        cursor=1, intents=[{"sub_task_id": "st-1"}, {"sub_task_id": "st-2"}]), "planner"),
+        cursor=1, replan_after_success=True, intents=[{"sub_task_id": "st-1"}, {"sub_task_id": "st-2"}]), "planner"),
     ("同一位置**复查过了** → 不再绕圈，去生成下一个",
      st(draft=DRAFT, verdict={"level": "只读"}, checks={"passed": True}, result={"ok": True},
         cursor=1, replanned_cursor=1,
