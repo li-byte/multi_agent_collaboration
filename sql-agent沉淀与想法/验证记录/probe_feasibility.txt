@@ -1,0 +1,16 @@
+PASS [GAP] G01_CTE_DELETE_READONLY: {"level": "只读", "action": "SELECT", "needs_confirm": false, "catalog_passed": true, "sql": "WITH removed AS (DELETE FROM products WHERE id = 1 RETURNING id) SELECT id FROM removed"}
+PASS [GAP] G02_CTE_REACHES_FAKE_EXECUTION: {"mock_semantic_validation": true, "fake_execute_calls": 1, "confirmation_calls": 0}
+PASS [GAP] G03_FAILED_EXECUTION_PASSES_REPORT: {"exec_ok": false, "consistency_passed": true}
+PASS [GAP] G04_VALIDATION_FLAG_TOO_WEAK: {"validated": true, "validated_passed": false, "report_passed": true, "note": "synthetic corrupted history; router separately guards normal flow"}
+PASS [GAP] G05_CANCELLED_RECORDED_EXECUTED: {"kind": "cancelled", "executed": true, "exec_ok": true, "report_passed": true, "actual_fake_execute_calls": 0}
+PASS [GAP] G06_PLANNER_LEDGER_ID_MISMATCH: {"opened": "planner-r0-c1", "finished": "planner-r0-c0"}
+PASS [GAP] G07_FIXER_LEDGER_ID_MISMATCH: {"opened": "fixer-r0-c0", "finished": "fixer-r1-c0", "returned_round": 1}
+PASS [GAP] G08_MEMORY_LOSES_COMPLETENESS: {"source_truncated": true, "memory_has_truncated": false, "memory_rows": 50, "entity_ids": 60}
+PASS [GAP] G09_MODEL_CLAIM_MARKED_VERIFIED: {"claim": "查询商品 —— 模型声称这就是全部商品", "verified": true}
+PASS [GAP] G10_NONCONSECUTIVE_OTHER_TASK_ERRORS: {"error_sequence": ["A", "B", "A"], "task_ids": ["other"], "destination": "reviewer", "reason": "停止重试：同一个错误已经连续出现 2 次，修正没有解决根因"}
+PASS [GAP] G11_DEPENDENCY_NOT_A_GATE: {"self_dependency_schema_accepted": true, "missing_dependency_destination": "generator"}
+PASS [GAP] G12_PARALLEL_SHARED_DRAFT_CONFLICT: {"exception": "InvalidUpdateError", "message": "At key 'draft': Can receive only one value per step. Use an Annotated key to handle multiple values."}
+PASS [FEASIBLE] F01_ASYNC_ANALYSIS_BACKEND_FEASIBLE: {"peak_active_calls": 2, "output_count": 2, "note": "LLM/ledger replaced; not LangGraph parallel integration"}
+PASS [GAP] G13_NO_CHECKPOINTER_STATE_READ: {"error": "No checkpointer set", "finish_unconditionally_reads_state": true}
+PASS [GAP] G14_MISSING_USAGE_COLLAPSES_TO_ZERO: {"missing_usage_total_tokens": 0}
+Observations=15, reproduced_gaps=14; no production fixes applied.
