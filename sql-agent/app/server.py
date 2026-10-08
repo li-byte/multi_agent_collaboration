@@ -70,6 +70,8 @@ class RunRequest(BaseModel):
 class ConfirmRequest(BaseModel):
     approve: bool = True
     by: str = "用户"
+    version: int = Field(ge=1, description="确认卡片所属账本版本")
+    sql_hash: str = Field(min_length=1, description="确认卡片显示的 SQL hash")
 
 
 # ---------------------------------------------------------------- 工具
@@ -187,7 +189,7 @@ async def list_samples() -> list[dict]:
 
 def _call_json(row: dict) -> dict:
     return {
-        "call_id": row["call_id"], "role": row["role"], "stage": row.get("stage"),
+        "call_id": row["call_id"], "global_task_id": row.get("global_task_id"), "turn": row.get("turn"), "role": row["role"], "stage": row.get("stage"),
         "round": row.get("round"), "cursor": row.get("cursor"), "attempt": row.get("attempt"),
         "model": row.get("model"),
         "prompt_tokens": row.get("prompt_tokens") or 0,
@@ -217,6 +219,25 @@ async def run_usage(request: Request, run_id: str) -> dict:
             "model": settings.deepseek_model,
             "llm_enabled": orch.rt.llm_enabled,
             "calls": [_call_json(c) for c in calls], **summary}
+
+
+@app.get("/api/conversations/{conversation_id}/usage")
+async def conversation_usage(request: Request, conversation_id: str) -> dict:
+    """当前会话全部轮次的真实模型消耗，保留每次调用的轮次归属。"""
+    orch = request.app.state.orch
+    turns = await orch.ledger.list_turns(conversation_id)
+    if not turns:
+        raise HTTPException(404, "未知会话")
+    calls = []
+    for turn in turns:
+        rid = str(turn["global_task_id"])
+        for call in await orch.ledger.list_llm_calls(rid):
+            calls.append(_call_json({**call, "global_task_id": rid, "turn": int(turn.get("turn") or 1)}))
+    calls.sort(key=lambda call: call["call_id"])
+    summary = await orch.ledger.usage_summary(conversation_id=conversation_id)
+    return {"conversation_id": conversation_id, "turns": len(turns),
+            "llm_mode": settings.llm_mode, "model": settings.deepseek_model,
+            "llm_enabled": orch.rt.llm_enabled, "calls": calls, **summary}
 
 
 @app.get("/api/usage")
@@ -276,8 +297,11 @@ async def start_run(request: Request, run_id: str) -> dict:
     run = await orch.ledger.get_run(run_id)
     if run is None:
         raise HTTPException(404, "未知任务")
-    if run["status"] in ("done", "failed"):
-        raise HTTPException(409, f"任务已处于终态：{run['status']}")
+    if run["status"] != "created":
+        raise HTTPException(409, f"任务无法再次启动：{run['status']}")
+    claimed = await orch.ledger.set_run_status(run_id, "queued", expected_version=run["version"])
+    if claimed is None:
+        raise HTTPException(409, "任务已被另一请求认领")
     asyncio.create_task(_guarded(orch, lambda: orch.run(run_id), f"任务 {run_id}"))
     return {"global_task_id": run_id, "accepted": True}
 
@@ -291,10 +315,15 @@ async def confirm_run(request: Request, run_id: str, req: ConfirmRequest) -> dic
         raise HTTPException(404, "未知任务")
     if run["status"] != "confirming":
         raise HTTPException(409, f"任务当前不在等待确认（状态：{run['status']}）")
+    if req.version != run["version"]:
+        raise HTTPException(409, "确认卡片已失效，请刷新当前任务")
     if orch._saver is None:
         raise HTTPException(409, "人工确认依赖 checkpointer，请把 USE_CHECKPOINTER 设为 on")
+    claimed = await orch.ledger.set_run_status(run_id, "resuming", expected_version=run["version"])
+    if claimed is None:
+        raise HTTPException(409, "确认已被另一请求消费")
     asyncio.create_task(_guarded(
-        orch, lambda: orch.resume(run_id, req.approve, req.by), f"确认 {run_id}"))
+        orch, lambda: orch.resume(run_id, req.approve, req.by, req.sql_hash), f"确认 {run_id}"))
     return {"global_task_id": run_id, "approve": req.approve, "by": req.by}
 
 
@@ -333,6 +362,7 @@ async def get_conversation(request: Request, conversation_id: str) -> dict:
             "global_task_id": rid, "question": t["question"], "status": t["status"],
             "turn": int(t.get("turn") or 1), "created_at": _iso(t.get("created_at")),
             "events": await orch.ledger.list_events(rid),
+            "tasks": [_task_json(task) for task in await orch.ledger.list_tasks(rid)],
             "audit": [_audit_json(a) for a in await orch.ledger.list_audit(rid)],
         })
     return {"conversation_id": conversation_id, "turns": out}

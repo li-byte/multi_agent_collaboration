@@ -1,0 +1,123 @@
+白名单来源：系统内置目录 app/catalog.py → ['customers', 'order_items', 'orders', 'products']
+
+  ✓ 只读  SELECT  SELECT id, name FROM customers WHERE city = '北京'
+  ✓ 只读  SELECT  SELECT c.name, SUM(o.total_amount) FROM customers c JOIN o
+  ✓ 只读  SELECT  SELECT * FROM orders LIMIT 10
+  ✎ 写入  INSERT  INSERT INTO customers (name, city) VALUES ('测试', '北京')
+  ✎ 写入  UPDATE  UPDATE products SET stock = 0 WHERE stock < 10
+  ✎ 写入  UPDATE  UPDATE orders SET status = '已完成' WHERE id = 3
+  ✎ 写入  INSERT  INSERT INTO orders (customer_id, status) VALUES (1, '待付款')
+  ✎ 写入  INSERT  INSERT INTO orders (customer_id, status) VALUES (1, 'x') O
+  ⏸ 需确认 DELETE  DELETE FROM orders WHERE status = '已取消'
+  ⏸ 需确认 DELETE  DELETE FROM orders
+  ⏸ 需确认 UPDATE  UPDATE orders SET status = 'x'
+  ⏸ 需确认 DELETE  DELETE FROM order_items WHERE order_id IN (SELECT id FROM 
+  ✎ 写入  UPDATE  UPDATE orders SET status = 'x' WHERE id IN (SELECT id FROM
+  ⏸ 需确认 UPDATE  UPDATE products SET stock = (SELECT count(*) FROM orders)
+  🚫 禁止  ?       DROP TABLE orders  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       DROP DATABASE cs_v1  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       TRUNCATE TABLE orders  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       ALTER TABLE orders ADD COLUMN x INT  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       CREATE TABLE evil (id INT)  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       CREATE INDEX idx ON orders(status)  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       GRANT ALL ON orders TO agent_sql_runner  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  SELECT  REVOKE SELECT ON orders FROM agent_sql_runner  ← 检测到危险操作：REVOKE
+  🚫 禁止  ?       COMMENT ON TABLE orders IS 'x'  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       SELECT 1; DROP TABLE orders  ← 一次只允许执行一条语句（检测到 2 条）
+  🚫 禁止  ?       DELETE FROM orders WHERE id=1; DELETE FROM orders WHERE id  ← 一次只允许执行一条语句（检测到 2 条）
+  🚫 禁止  ?       BEGIN; DELETE FROM orders; COMMIT  ← 一次只允许执行一条语句（检测到 3 条）
+  🚫 禁止  ?       DROP/**/TABLE orders  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       dRoP tAbLe orders  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       SELECT 1 -- 
+; DROP TABLE orders  ← 一次只允许执行一条语句（检测到 2 条）
+  🚫 禁止  SELECT  SELECT pg_read_file('/etc/passwd')  ← 函数不在允许范围内：pg_read_file
+  🚫 禁止  SELECT  SELECT lo_import('/etc/passwd')  ← 函数不在允许范围内：lo_import
+  🚫 禁止  ?       DO $$ BEGIN DELETE FROM orders; END $$  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  ?       COPY orders TO '/tmp/x.csv'  ← 不允许的语句类型：未知。只允许 SELECT / INSERT / UPDATE / DELETE
+  🚫 禁止  SELECT  SELECT * INTO evil FROM orders  ← SELECT INTO 会创建新表，已拒绝
+  🚫 禁止  SELECT  SELECT * FROM agent_run  ← 访问了未授权的真实表：agent_run
+  🚫 禁止  SELECT  SELECT * FROM pg_shadow  ← 访问了未授权的真实表：pg_shadow
+  🚫 禁止  SELECT  SELECT * FROM products1 LIMIT 10  ← 访问了未授权的真实表：products1
+  🚫 禁止  SELECT  SELECT * FROM products2 LIMIT 10  ← 访问了未授权的真实表：products2
+  🚫 禁止  SELECT  SELECT * FROM products1 UNION ALL SELECT * FROM products2  ← 访问了未授权的真实表：products1、products2
+  🚫 禁止  DELETE  DELETE FROM products1 WHERE id = 1  ← 访问了未授权的真实表：products1
+  ✓ 只读  SELECT  SELECT * FROM public.products
+  ✓ 只读  SELECT  SELECT p.name FROM public.orders o JOIN public.products p 
+  🚫 禁止  SELECT  SELECT * FROM public.agent_run  ← 访问了未授权的真实表：agent_run
+  🚫 禁止  SELECT  SELECT * FROM pg_catalog.pg_class  ← 不允许访问 schema：pg_catalog；只能访问 public 下的表，且**不要写 schema 前缀**
+  🚫 禁止  SELECT  SELECT * FROM information_schema.tables  ← 不允许访问 schema：information_schema；只能访问 public 下的表，且**不要写 schema 前缀**
+  ✎ 写入  UPDATE  UPDATE public.products SET stock = 1 WHERE id = 1
+  🚫 禁止  UPDATE  UPDATE agent_run SET status = 'done'  ← 访问了未授权的真实表：agent_run
+  ✓ 只读  SELECT  SELECT * FROM orders WHERE status = 'DROP TABLE orders'
+  ✎ 写入  INSERT  INSERT INTO customers (name, city) VALUES ('DELETE FROM or
+
+「不许偷换表」检查：
+
+  ✓ 通过  意图表=['products']  SELECT * FROM products LIMIT 10
+  ✓ 通过  意图表=['orders', 'customers']  SELECT c.name, o.id FROM orders o JOIN custo
+  🚫 拦截  意图表=['products']  SELECT * FROM products1 LIMIT 10
+        生成器只选定了 products，SQL 还用了 products1；**不允许为了绕开「表不存在」而更换表名** —— 那等于换了问题。确实需要别的表，请退回重新选表
+  🚫 拦截  意图表=['products']  SELECT * FROM products2 LIMIT 10
+        生成器只选定了 products，SQL 还用了 products2；**不允许为了绕开「表不存在」而更换表名** —— 那等于换了问题。确实需要别的表，请退回重新选表
+  🚫 拦截  意图表=['products']  SELECT * FROM orders
+        生成器只选定了 products，SQL 还用了 orders；**不允许为了绕开「表不存在」而更换表名** —— 那等于换了问题。确实需要别的表，请退回重新选表
+  ✓ 通过  意图表=（未声明）  SELECT * FROM products
+
+按「系统目录的表信息」核对表与字段：
+
+  ✓ 放行  SELECT id, name FROM customers WHERE city = '北京'
+  ✓ 放行  SELECT c.name, SUM(o.total_amount) FROM customers c JOIN orders o 
+  ✓ 放行  SELECT count(*) FROM orders WHERE status = '已取消'
+  ✓ 放行  UPDATE products SET stock = 0 WHERE stock < 10
+  ✓ 放行  DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders W
+  ✓ 放行  SELECT name AS n FROM customers ORDER BY n
+  ✓ 放行  SELECT date_trunc('month', created_at) FROM orders
+  ✓ 放行  SELECT * FROM orders WHERE created_at > now() - interval '30 days'
+  ✓ 放行  WITH x AS (SELECT id FROM orders) SELECT * FROM x
+  ✓ 放行  SELECT * FROM public.products
+  ✓ 放行  SELECT p.name, SUM(i.qty * i.unit_price) FROM order_items i JOIN p
+  ✓ 放行  SELECT c.level, count(DISTINCT o.id) FROM customers c LEFT JOIN or
+  ✓ 放行  INSERT INTO customers (name, city) VALUES ('测试', '北京')
+  ✓ 放行  SELECT coalesce(phone, '未知') FROM customers
+  🚫 拦下  SELECT nonexistent_col FROM customers
+  🚫 拦下  SELECT c.nope FROM customers c
+  🚫 拦下  SELECT * FROM customers WHERE nope = 1
+  🚫 拦下  SELECT nope FROM orders
+
+用户输入体检（夹带 SQL 一律按危险操作）：
+
+  🚫 拦下  先修正再生成再校验再返回给我 SELECT * FROM users WHERE name = 张三; 报错信息：ERROR 1
+  🚫 拦下  SELECT * FROM customers
+  🚫 拦下  帮我执行 delete from orders where id = 1
+  🚫 拦下  帮我 drop table orders
+  🚫 拦下  insert into customers values (1)
+  ✓ 放过  查一下北京客户的订单总额
+  ✓ 放过  帮我查一下 customers 表里有没有叫张三的
+  ✓ 放过  把所有库存少于 10 的商品补到 20
+  ✓ 放过  你好，你能做什么？
+  ✓ 放过  那再按城市分组看看
+  ✓ 放过  帮我删掉所有已取消的订单
+  ✓ 放过  给我一条查北京的 SQL，不用执行
+
+用户提到的表必须在系统目录里：
+
+  🚫 查一下 users 表里有没有张三  → ['users']
+  🚫 查一下 products1 表  → ['products1']
+  ✓ 帮我删掉 orders 表  → （都在目录里）
+  ✓ 看一下 customers 和 orders 的数据  → （都在目录里）
+  ✓ 查一下北京客户的订单总额  → （都在目录里）
+
+离线模式的「危险」判定（动词与表名之间隔了字也要认出来）：
+
+  🚫 危险  帮我删掉 orders 表
+  🚫 危险  帮我把 orders 表删了
+  🚫 危险  把 customers 表清空
+  🚫 危险  帮我给 customers 表加一个字段
+  🚫 危险  drop table orders
+  ✓ 安全  帮我删掉 orders 表里的数据
+  ✓ 安全  清空购物车里的记录
+  ✓ 安全  查一下 orders 表里的订单
+  ✓ 安全  删掉所有已取消的订单
+
+共 99 项，失败 0 项。
+✓ 静态防线通过：危险语句全拦截、正常语句不误伤、偷换表与目录外表被拦下

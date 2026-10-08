@@ -112,6 +112,11 @@ CREATE TABLE IF NOT EXISTS agent_memory (
     UNIQUE (global_task_id, sub_task_id)
 );
 CREATE INDEX IF NOT EXISTS idx_memory_run ON agent_memory(global_task_id, sub_task_id);
+-- 增量升级：旧记忆无法证明完整性，默认标记为截断/样本。
+ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS truncated BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS sampled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS interpretation TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_memory ADD COLUMN IF NOT EXISTS interpretation_verified BOOLEAN NOT NULL DEFAULT false;
 
 
 -- ================================================================

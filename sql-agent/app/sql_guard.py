@@ -93,6 +93,7 @@ class SqlVerdict:
     reasons: list[str] = field(default_factory=list)   # 拒绝原因
     notes: list[str] = field(default_factory=list)     # 提示（不拦）
     statements: int = 1
+    normalized_sql: str = ""
 
     @property
     def ok(self) -> bool:
@@ -293,6 +294,74 @@ def analyze(sql: str, allowed_tables: set[str] | None = None) -> SqlVerdict:
 
     flat = strip_literals(single)
 
+    # PostgreSQL AST 检查嵌套语句；sqlparse 的顶层分类不能发现写 CTE。
+    # 首版不支持嵌套写入：直接拒绝，避免外层 SELECT 掩盖副作用。
+    try:
+        from pglast import ast, parse_sql
+        root = parse_sql(single)[0].stmt
+        def nodes(value):
+            if isinstance(value, ast.Node):
+                yield value
+                for name in value:
+                    yield from nodes(getattr(value, name))
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    yield from nodes(item)
+        tree = list(nodes(root))
+        ast_tables, ast_schemas = set(), set()
+        def refs(value, scope=frozenset()):
+            if isinstance(value, ast.RangeVar):
+                if value.catalogname:
+                    ast_schemas.add(value.catalogname)
+                if value.schemaname and value.schemaname != "public":
+                    ast_schemas.add(value.schemaname)
+                if value.schemaname or value.catalogname or value.relname not in scope:
+                    ast_tables.add(value.relname)
+            elif isinstance(value, ast.Node):
+                clause = getattr(value, "withClause", None)
+                local = set(scope)
+                if clause:
+                    # 非递归 CTE 仅可见此前 CTE；递归 CTE 可见同层声明。
+                    recursive = {c.ctename for c in clause.ctes} if clause.recursive else set()
+                    for cte in clause.ctes:
+                        refs(cte.ctequery, frozenset(local | recursive))
+                        local.add(cte.ctename)
+                for name in value:
+                    if name != "withClause":
+                        # INSERT/UPDATE/DELETE 的目标始终是真实表，不能被 CTE 名遮蔽。
+                        refs(getattr(value, name), frozenset() if name == "relation" else frozenset(local))
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    refs(item, scope)
+        refs(root)
+    except Exception:
+        return SqlVerdict(level="禁止", action=action, reasons=["PostgreSQL 语法解析失败，拒绝执行"])
+    if any(isinstance(n, (ast.InsertStmt, ast.UpdateStmt, ast.DeleteStmt))
+           and n is not root for n in tree):
+        return SqlVerdict(level="禁止", action=action, reasons=["不支持包含写入操作的 CTE/嵌套语句，请拆为独立任务"])
+    if any(isinstance(n, ast.SelectStmt) and n.intoClause is not None for n in tree):
+        return SqlVerdict(level="禁止", action=action, reasons=["SELECT INTO 会创建新表，已拒绝"])
+    safe_functions = {
+        "count", "sum", "avg", "min", "max", "round", "abs", "ceil", "ceiling", "floor",
+        "lower", "upper", "length", "char_length", "btrim", "ltrim", "rtrim",
+        "concat", "concat_ws", "replace", "substring", "substr", "left", "right",
+        "date_trunc", "date_part", "now", "to_char", "to_date", "to_timestamp",
+        "array_agg", "string_agg", "json_agg", "jsonb_agg", "bool_and", "bool_or",
+        "row_number", "rank", "dense_rank", "lag", "lead", "first_value", "last_value",
+    }
+    for node in tree:
+        if isinstance(node, ast.FuncCall):
+            name = [part.sval for part in node.funcname]
+            if name[-1] not in safe_functions or (len(name) > 1 and name[:-1] != ["pg_catalog"]):
+                return SqlVerdict(level="禁止", action=action,
+                                  reasons=[f"函数不在允许范围内：{'.'.join(name)}"])
+            fixed_arity = {"sum": 1, "avg": 1, "min": 1, "max": 1, "abs": 1,
+                           "lower": 1, "upper": 1, "length": 1, "char_length": 1,
+                           "array_agg": 1, "json_agg": 1, "jsonb_agg": 1,
+                           "bool_and": 1, "bool_or": 1, "now": 0}
+            if name[-1] in fixed_arity and len(node.args or ()) != fixed_arity[name[-1]]:
+                return SqlVerdict(level="禁止", action=action, reasons=["函数参数数量不在允许范围内"])
+
     # ③ 危险关键字扫描
     hits: list[str] = []
     for pattern, label in FORBIDDEN_PATTERNS:
@@ -311,6 +380,8 @@ def analyze(sql: str, allowed_tables: set[str] | None = None) -> SqlVerdict:
 
     # ⑤ 表名白名单（含 schema 前缀校验）
     tables, bad_schemas = extract_refs(single)
+    tables = sorted(set(tables) | ast_tables)
+    bad_schemas = sorted(set(bad_schemas) | ast_schemas)
     notes: list[str] = []
     if bad_schemas:
         return SqlVerdict(
@@ -318,7 +389,11 @@ def analyze(sql: str, allowed_tables: set[str] | None = None) -> SqlVerdict:
             reasons=[f"不允许访问 schema：{'、'.join(bad_schemas)}；"
                      f"只能访问 public 下的表，且**不要写 schema 前缀**"],
         )
-    if allowed_tables:
+    if allowed_tables is not None:
+        # AST 已按 PostgreSQL 规则折叠非引号名称；引号名称必须精确匹配。
+        if ast_tables - set(allowed_tables):
+            return SqlVerdict(level="禁止", action=action, tables=tables,
+                              reasons=["访问了未授权的真实表：" + "、".join(sorted(ast_tables - set(allowed_tables)))])
         unknown = [t for t in tables if t.lower() not in {x.lower() for x in allowed_tables}]
         if unknown:
             return SqlVerdict(
@@ -345,4 +420,13 @@ def analyze(sql: str, allowed_tables: set[str] | None = None) -> SqlVerdict:
     if action == "SELECT" and not re.search(r"\blimit\b", flat, re.I):
         notes.append("没有 LIMIT，结果会被系统截断到上限行数")
 
-    return SqlVerdict(level=level, action=action, tables=tables, notes=notes, statements=1)
+    normalized = single
+    calls = [n for n in tree if isinstance(n, ast.FuncCall)]
+    if calls:
+        # 在生成/修正阶段固定内置函数解析，防止 public 的同名重载被选中。
+        from pglast.stream import RawStream
+        for call in calls:
+            call.funcname = (ast.String(sval="pg_catalog"), call.funcname[-1])
+        normalized = RawStream()(root)
+    return SqlVerdict(level=level, action=action, tables=tables, notes=notes,
+                      statements=1, normalized_sql=normalized)

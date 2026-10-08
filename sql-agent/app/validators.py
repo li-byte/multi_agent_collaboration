@@ -79,7 +79,8 @@ def validate(
 
     # ---- S3 必须校验过才能执行 ----
     unvalidated = [h.get("sub_task_id", "?") for h in history
-                   if h.get("executed") and not h.get("validated")]
+                   if h.get("executed") and
+                   (not h.get("validated") or h.get("validated_passed") is not True)]
     results.append(_r("S3_validated_before_exec", not unvalidated,
                       "所有执行过的 SQL 都经过校验" if not unvalidated
                       else f"这些 SQL 没校验就执行了：{', '.join(unvalidated)}", unvalidated))
@@ -117,7 +118,9 @@ def validate(
                           else f"用户明确说了不执行，却有语句被执行了：{', '.join(sneaked)}",
                           sneaked))
     else:
-        done = {h.get("sub_task_id") for h in history if h.get("executed")}
+        done = {h.get("sub_task_id") for h in history
+                if h.get("executed") and h.get("exec_ok") is True
+                and h.get("kind") != "cancelled"}
         missing = [sid for sid in planned if sid not in done]
         if refusal:
             # 规划器判定请求超出允许范围 —— 本来就不该有子任务，这是正确行为
@@ -133,7 +136,7 @@ def validate(
             results.append(_r("S7_intent_coverage", False, "规划器没有拆出任何子任务"))
         else:
             results.append(_r("S7_intent_coverage", not missing,
-                              f"{len(planned)} 个子任务全部有 SQL 并执行"
+                              f"{len(planned)} 个子任务全部执行成功"
                               if not missing else f"这些子任务没有落地：{', '.join(missing)}", missing))
 
     # ---- S8 幂等键 ----

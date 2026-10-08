@@ -847,3 +847,16 @@ Python 编译                    ✅ 23 个文件
 8. **收尾讲安全**：应用层拦截可以被绕过，但**数据库权限绕不过去** —— `check_isolation.py` 实测为证
 
 > 技术选型可以不同，边界不能空着。
+
+## 10. 执行可靠性改造（2026-10-08）
+
+新增 PostgreSQL AST 风险检查、只读事务、SQL 校验/确认绑定、准确取消终态、记忆完整性与 checkpoint 模式处理。新增离线回归：`python scripts/check_reliability.py`。
+
+升级需安装最新 requirements（新增 pglast），并验证后应用账本增量 schema。确认接口新增必填 `version/sql_hash`，前端已同步；旧在途 checkpoint 缺少新校验字段时会保守拒绝，建议升级前结束任务。详细范围、验证证据与剩余工作见 [首批改造落地与验证记录](../sql-agent沉淀与想法/05-首批改造落地与验证记录.md)。目前未完成业务 SQL 的跨库幂等、worker 接管和真实数据库故障验证。
+
+
+### 会话视图范围（2026-10-08）
+
+时序图、数据流转、顶栏消耗、消耗清单和 SQL 审计都覆盖当前会话的全部对话轮次。继续提问保留既有记录；新建或切换会话时重新加载该会话。消耗明细通过 `GET /api/conversations/{conversation_id}/usage` 汇总，保留调用所属任务与对话轮次。人工确认仍绑定当前任务的确认版本和 SQL 哈希。
+
+回归检查：`python scripts/check_session.py`（需 Node.js）和 `python scripts/check_session_usage.py`；详细说明见 [会话视图累计范围与验证](../sql-agent沉淀与想法/06-会话视图累计范围与验证.md)。

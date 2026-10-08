@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     max_rounds: int = 3
     lease_seconds: int = 300
     use_checkpointer: bool = True
+    semantic_review: bool = False  # 可选模型语义复核，默认只运行程序门禁
+    table_filter_threshold: int = 20  # 小目录直接生成；大目录才单独调用模型选表
+    replan_after_success: bool = False  # 仅按需开启逐步规划复查
 
     # ---------- 执行沙箱 ----------
     max_rows: int = 500

@@ -365,6 +365,8 @@ class TaskState(TypedDict, total=False):
     safety: str             # 规划器对危险性与越界性的评估
     chat_reply: str         # mode=chat 时规划器给的直接回复
     status: str
+    last_consistency: dict
+    replan_after_success: bool
     version: int
     round: int              # 修正轮次
     intents: list[dict]     # 规划器拆出的子任务（只有任务，没有表；含 depends_on / acceptance）

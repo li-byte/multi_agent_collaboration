@@ -306,6 +306,8 @@ class Ledger:
         sql_text: str, action: str | None, stage: str, verified: bool,
         entities: dict | None = None, columns: list | None = None,
         rows: list | None = None, rowcount: int | None = None, round_no: int = 0,
+        truncated: bool = False, sampled: bool = False,
+        interpretation: str = "", interpretation_verified: bool = False,
     ) -> int:
         """写一条共享记忆（同一子任务只保留最新一条），返回 mem_id。
 
@@ -315,19 +317,22 @@ class Ledger:
         sql = """
         INSERT INTO agent_memory (global_task_id, sub_task_id, claim, sql_id, sql_text,
                                   action, stage, verified, entities, columns, rows,
-                                  rowcount, round)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                  rowcount, round, truncated, sampled, interpretation, interpretation_verified)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (global_task_id, sub_task_id) DO UPDATE SET
             claim = EXCLUDED.claim, sql_id = EXCLUDED.sql_id, sql_text = EXCLUDED.sql_text,
             action = EXCLUDED.action, stage = EXCLUDED.stage, verified = EXCLUDED.verified,
             entities = EXCLUDED.entities, columns = EXCLUDED.columns, rows = EXCLUDED.rows,
-            rowcount = EXCLUDED.rowcount, round = EXCLUDED.round, created_at = now()
+            rowcount = EXCLUDED.rowcount, round = EXCLUDED.round,
+            truncated = EXCLUDED.truncated, sampled = EXCLUDED.sampled,
+            interpretation = EXCLUDED.interpretation,
+            interpretation_verified = EXCLUDED.interpretation_verified, created_at = now()
         RETURNING mem_id
         """
         row = await self.fetchone(sql, (
             _uid(run_id), sub_task_id, claim, sql_id, sql_text, action, stage, verified,
             _json(entities or {}), _json(columns or []), _json(rows or []),
-            rowcount, round_no))
+            rowcount, round_no, truncated, sampled, interpretation, interpretation_verified))
         assert row is not None
         return int(row["mem_id"])
 
@@ -397,12 +402,17 @@ class Ledger:
                 r["created_at"] = r["created_at"].isoformat()
         return rows
 
-    async def usage_summary(self, run_id: str | None = None) -> dict:
-        """消耗汇总。给了 run_id 就是本轮，否则是**全部会话**的累计。
+    async def usage_summary(self, run_id: str | None = None, *, conversation_id: str | None = None) -> dict:
+        """消耗汇总。按 run_id 或 conversation_id 过滤，均不指定时统计全部会话。
 
         只统计真数（`SUM`），不做任何估算 —— 数字要能对账。
         """
         where, params = ("WHERE global_task_id = %s", (_uid(run_id),)) if run_id else ("", ())
+        if conversation_id:
+            if run_id:
+                raise ValueError("run_id 和 conversation_id 不能同时指定")
+            where = "WHERE global_task_id IN (SELECT global_task_id FROM agent_run WHERE conversation_id = %s)"
+            params = (_uid(conversation_id),)
         total = await self.fetchone(
             f"""SELECT count(*) AS calls,
                        coalesce(sum(prompt_tokens), 0)     AS prompt_tokens,

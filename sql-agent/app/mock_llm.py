@@ -279,6 +279,10 @@ def mock_reviewer(report, history: list[dict], state: dict) -> ReviewerOutput:
     question = state.get("question", "")
     mode = state.get("mode") or "execute"
 
+    if state.get("status") == "cancelled":
+        return ReviewerOutput(decision="veto", final_answer="你取消了本次执行；这条 SQL 没有执行，后续任务也没有继续。",
+                              checks=_checks(report), reason="用户取消，目标未全部完成", handoff_to="done")
+
     # ① 被静态防线拦下 —— **该交付的照给**（修好的 / 用户那条 SQL），只是不能执行。
     #    这一条必须放在最前面：一旦被拦，校验器根本没跑过，
     #    再往下走别的分支就会拿着一份不存在的校验结果硬报结论。

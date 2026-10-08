@@ -147,7 +147,7 @@ class BizDatabase:
 
     # ------------------------------------------------------------ 执行
 
-    async def execute(self, sql: str, max_rows: int = 500) -> dict:
+    async def execute(self, sql: str, max_rows: int = 500, *, read_only: bool = False) -> dict:
         """在受限连接上执行一条 SQL。
 
         · 包在**显式事务**里 —— 出错自动回滚，不留半截状态
@@ -158,6 +158,9 @@ class BizDatabase:
             try:
                 async with conn.transaction():
                     async with conn.cursor() as cur:
+                        if read_only:
+                            await cur.execute("SET TRANSACTION READ ONLY")
+                        await cur.execute("SET LOCAL search_path = pg_catalog, public")
                         await cur.execute(sql)
                         if cur.description is not None:
                             columns = [d.name for d in cur.description]

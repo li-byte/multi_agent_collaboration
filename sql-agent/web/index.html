@@ -248,7 +248,7 @@
   <div class="pills">
     <span class="pill" id="p-status">状态 <b>—</b></span>
     <span class="pill" id="p-round">轮次 <b>—</b></span>
-    <span class="pill" id="p-usage" title="本轮大模型消耗：调用次数与 token 合计（token 取自模型响应，不估算）">消耗 <b>—</b></span>
+    <span class="pill" id="p-usage" title="当前会话大模型消耗：全部轮次的调用次数与 token 合计（token 取自模型响应，不估算）">消耗 <b>—</b></span>
     <span class="pill" id="p-health">连接中…</span>
   </div>
   <div class="hbtns">
@@ -356,7 +356,7 @@ const AGENT = {
 const A = (r) => AGENT[r] || AGENT.system;
 const STATUS_CN = { created:'已创建', planning:'规划中', generating:'生成中', validating:'校验中',
                     confirming:'⏸ 等确认', executing:'执行中', fixing:'修正中',
-                    reviewing:'审查中', done:'已完成', failed:'失败' };
+                    reviewing:'审查中', queued:'排队中', resuming:'恢复中', cancelled:'已取消', done:'已完成', failed:'失败' };
 const statusCN = (s) => STATUS_CN[s] || s || '—';
 
 const store = { chat:[], blocks:[], folds:{}, runId:null, runInfo:{}, events:[], tasks:[],
@@ -364,10 +364,10 @@ const store = { chat:[], blocks:[], folds:{}, runId:null, runInfo:{}, events:[],
                 rawAll:false, conversationId:null, curBlock:{}, blockSeq:0,
                 // 导出会话时置 true：同一套渲染，但去掉"要点击才成立"的东西
                 exporting:false,
-                // 消耗：本轮实时累加（来自 llm_call 事件）+ 打开面板时拉取的完整明细
+                // 消耗：当前会话实时累加（来自 llm_call 事件）+ 打开面板时拉取的完整明细
                 usage:{ calls:0, prompt_tokens:0, completion_tokens:0, total_tokens:0,
                         cached_tokens:0, duration_ms:0, failed:0 },
-                usageDetail:null };
+                usageDetail:null, seenEvents:new Set(), runs:{}, sessionEpoch:0 };
 
 /* ---------------- 事件 ---------------- */
 /* 气泡按「**一次节点调用**」分，不按角色分。
@@ -377,7 +377,7 @@ const store = { chat:[], blocks:[], folds:{}, runId:null, runInfo:{}, events:[],
    现在 node_start 开一个新气泡并登记为该角色的"当前气泡"，它后续的事件都落进去。 */
 function newBlock(role, round) {
   const key = `${store.runId || ''}::${role}::${round}::${++store.blockSeq}`;
-  const b = { kind:'agent', key, role, round, typing:true, items:[], summary:'' };
+  const b = { kind:'agent', key, runId:store.runId, role, round, typing:true, items:[], summary:'' };
   store.blocks.push(b); store.chat.push(b); store.curBlock[role] = key;
   return b;
 }
@@ -400,10 +400,17 @@ document.addEventListener('toggle', (ev) => {
 const foldOpen = (k, def) => (k in store.folds ? store.folds[k] : def);
 
 function handleEvent(e) {
+  const runId = e.global_task_id || store.runId;
+  if (e.seq != null) {
+    const key = `${runId}:${e.seq}`;
+    if (store.seenEvents.has(key)) return;
+    store.seenEvents.add(key);
+  }
   store.events.push(e);
   const p = e.payload || {}, role = e.role, round = e.round ?? 0;
   switch (e.event_type) {
     case 'run_created':
+      store.runs[runId] = { turn:p.turn, question:p.question };
       store.runInfo = { question:p.question, status:'created', version:0, round:0,
                         turn:p.turn, conversation_id:p.conversation_id, tables:p.tables||[] };
       if (p.conversation_id) store.conversationId = p.conversation_id;
@@ -442,7 +449,8 @@ function handleEvent(e) {
       u.cached_tokens += p.cached_tokens || 0;
       u.duration_ms += p.duration_ms || 0;
       if (p.ok === false) u.failed += 1;
-      store.usageDetail = null;      // 面板下次打开时重新拉
+      store.usageDetail = null;
+      if (store.infoMode === 'usage' && $('info-overlay').classList.contains('open')) void openInfo('usage');
       renderHeader();
       break;
     }
@@ -473,7 +481,7 @@ function handleEvent(e) {
     case 'confirmed':
       store.awaiting = null;
       for (const b of store.blocks) for (const it of b.items)
-        if (it.type === 'confirm') { it.done = true; it.approve = p.approve; it.by = p.by; }
+        if (b.runId === runId && it.type === 'confirm' && !it.done) { it.done = true; it.approve = p.approve; it.by = p.by; }
       push({ kind:'sys', text:`你${p.approve ? '确认执行' : '取消了执行'}（${p.by}）` });
       break;
     case 'result': {
@@ -516,8 +524,8 @@ function renderHeader() {
   // 就用打开面板时拉到的那份总账兜底 —— 两个口径都来自同一张表。
   const live = store.usage;
   const fall = (store.usageDetail && store.usageDetail.total) || null;
-  const calls = live.calls || (fall ? fall.calls : 0);
-  const tokens = live.calls ? live.total_tokens : (fall ? fall.total_tokens : 0);
+  const calls = fall ? fall.calls : live.calls;
+  const tokens = fall ? fall.total_tokens : live.total_tokens;
   $('p-usage').innerHTML = calls
     ? `消耗 <b>${calls}</b> 次 · <b>${fmtNum(tokens)}</b> tok`
     : '消耗 <b>—</b>';
@@ -677,8 +685,9 @@ function renderItem(it, b) {
     if (!it.done) {
       // 导出的记录里不产生按钮：那份 HTML 是给别人看的，不是给人点的
       if (!store.exporting) {
-        h += `<div class="acts"><button class="btn ok" data-confirm="1">确认执行</button>
-          <button class="btn cancel" data-confirm="0">取消</button></div>`;
+        const binding = `data-confirm-version="${esc(q.confirmation_version)}" data-confirm-hash="${esc(q.sql_hash)}"`;
+        h += `<div class="acts"><button class="btn ok" data-confirm="1" ${binding}>确认执行</button>
+          <button class="btn cancel" data-confirm="0" ${binding}>取消</button></div>`;
       } else {
         h += `<div style="margin-top:8px;font-weight:700;color:#6b7280">⏸ 当时在等用户确认</div>`;
       }
@@ -810,11 +819,17 @@ async function send() {
   if (store.finished && store.conversationId) beginTurn();
   box.value = ''; box.style.height = 'auto';
   push({ kind:'user', text });
+  const epoch = store.sessionEpoch;
   const btn = $('btn-send'); btn.disabled = true;
   try {
     const r = await fetch('/api/runs', { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ question: text, conversation_id: store.conversationId }) });
     const created = await r.json();
+    if (store.sessionEpoch !== epoch) {
+      await fetch(`/api/runs/${created.global_task_id}/start`, { method:'POST' });
+      loadSessions();
+      return;
+    }
     store.runId = created.global_task_id;
     store.conversationId = created.conversation_id;
     store.runInfo = { question: text, status:'created', version:0, round:0,
@@ -825,38 +840,43 @@ async function send() {
   finally { btn.disabled = false; }
 }
 
-/** 上一轮已结束，在同一会话里开启下一轮：保留对话，只重置「本轮」的状态 */
+/** 继续当前会话，保留所有轮次的记录，只重置活动任务状态。 */
 function beginTurn() {
   if (store.es) { store.es.close(); store.es = null; }
-  store.blocks = []; store.events = []; store.tasks = []; store.audit = [];
   store.awaiting = null; store.finished = false; store.curBlock = {};
-  resetUsage();
+  store.usageDetail = null;
   store.chat.push({ kind:'turn' });
 }
 
-/** 本轮消耗清零（顶栏那个数字是「本轮」，消耗清单面板也是这一轮） */
+/** 新建或切换会话时清零累计消耗。 */
 function resetUsage() {
   store.usage = { calls:0, prompt_tokens:0, completion_tokens:0, total_tokens:0,
                   cached_tokens:0, duration_ms:0, failed:0 };
   store.usageDetail = null;
 }
 
-async function decide(approve, by='用户') {
+async function decide(approve, version, sqlHash, by='用户') {
   if (!store.runId || !store.awaiting) return;
   document.querySelectorAll('[data-confirm]').forEach((b) => { b.disabled = true; });
-  await fetch(`/api/runs/${store.runId}/confirm`, {
+  const response = await fetch(`/api/runs/${store.runId}/confirm`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ approve, by }) });
+    body: JSON.stringify({ approve, by, version:Number(version), sql_hash:sqlHash }) });
+  if (!response.ok) {
+    push({ kind:'sys', text:'确认未被接受，请重新打开当前任务的确认卡片。' });
+    render();
+  }
 }
 
 function openStream(runId) {
   if (store.es) store.es.close();
   const es = new EventSource(`/api/runs/${runId}/stream`);
   store.es = es;
+  const conversationId = store.conversationId;
   ['run_created','node_start','node_end','plan','memory','llm_call','sql','check','verdict',
    'handoff','await_confirm','confirmed','result','consistency','review','stalled','give_up',
    'done','error'].forEach((t) => {
     es.addEventListener(t, (ev) => {
+      if (store.es !== es || store.runId !== runId || store.conversationId !== conversationId) return;
       try { handleEvent(JSON.parse(ev.data)); } catch (e) { console.error(e); }
       if (t === 'done') { store.finished = true; es.close(); store.es = null; loadSessions(); }
     });
@@ -865,11 +885,13 @@ function openStream(runId) {
 }
 
 function newSession() {
+  store.sessionEpoch += 1;
   if (store.es) { store.es.close(); store.es = null; }
   store.chat = []; store.blocks = []; store.folds = []; store.events = []; store.tasks = [];
   store.audit = []; store.awaiting = null; store.finished = false;
   store.runId = null; store.runInfo = {}; store.conversationId = null;
   store.curBlock = {}; store.blockSeq = 0;
+  store.seenEvents = new Set(); store.runs = {};
   resetUsage();
   render();
 }
@@ -877,17 +899,21 @@ function newSession() {
 /** 打开一个会话：**把所有轮次按顺序回放**，而不是只显示最后一轮 */
 async function openSession(convId) {
   newSession(); store.conversationId = convId;
+  const epoch = store.sessionEpoch;
   let d;
   try { d = await (await fetch(`/api/conversations/${convId}`)).json(); }
   catch (e) { return; }
+  if (store.sessionEpoch !== epoch || store.conversationId !== convId) return;
   const turns = d.turns || [];
   if (!turns.length) return;
   turns.forEach((t, idx) => {
     if (idx > 0) store.chat.push({ kind:'turn' });
     store.runId = t.global_task_id;       // 让气泡按 run / 节点调用隔离
     store.curBlock = {};                  // 回放上一轮时不能把气泡接到本轮的块上
-    resetUsage();                         // 同理：消耗也按轮算
-    store.audit = t.audit || [];
+    store.runs[t.global_task_id] = {turn:t.turn, question:t.question};
+    mergeRunRecords('audit', t.global_task_id, t.audit || []);
+    mergeRunRecords('tasks', t.global_task_id, t.tasks || []);
+    store.awaiting = null;
     store.finished = false;
     store.chat.push({ kind:'user', text: t.question });
     (t.events || []).forEach(handleEvent);
@@ -896,14 +922,20 @@ async function openSession(convId) {
   store.runId = last.global_task_id;
   store.runInfo = { question: last.question, status: last.status, turn: last.turn,
                     round: 0, conversation_id: convId };
-  store.audit = last.audit || [];
   render(); loadSessions();
-  if (!['done','failed'].includes(last.status)) { store.finished = false; openStream(last.global_task_id); }
+  if (!['done','failed','cancelled'].includes(last.status)) { store.finished = false; openStream(last.global_task_id); }
+}
+function mergeRunRecords(kind, runId, rows) {
+  store[kind] = store[kind].filter(row => row.global_task_id !== runId)
+    .concat((rows || []).map(row => ({...row, global_task_id:runId, turn:store.runs[runId]?.turn})));
 }
 async function refreshDetail() {
-  if (!store.runId) return;
-  const d = await (await fetch(`/api/runs/${store.runId}`)).json();
-  store.tasks = d.tasks; store.audit = d.audit;
+  const runId = store.runId, conversationId = store.conversationId, epoch = store.sessionEpoch;
+  if (!runId) return;
+  const d = await (await fetch(`/api/runs/${runId}`)).json();
+  if (store.sessionEpoch !== epoch || store.conversationId !== conversationId || store.runId !== runId) return;
+  mergeRunRecords('tasks', runId, d.tasks);
+  mergeRunRecords('audit', runId, d.audit);
   if ($('info-overlay').classList.contains('open')) renderInfo();
 }
 
@@ -915,7 +947,7 @@ function useCard(k, v, d, cls) {
 }
 function renderInfo() {
   if (store.infoMode === 'usage') {
-    $('info-title').textContent = '大模型消耗清单';
+    $('info-title').textContent = '当前会话 · 大模型消耗清单';
     const d = store.usageDetail;
     if (!d) { $('info-body').innerHTML = '<div class="empty">加载中…</div>'; return; }
     // 「离线模式」的提示只在**确实没有调用记录**时才给。
@@ -924,7 +956,7 @@ function renderInfo() {
     if (!d.llm_enabled && !(d.calls || []).length) {
       $('info-hint').textContent = '离线 mock 模式';
       $('info-body').innerHTML = `<div class="empty">当前是 <b>LLM_MODE=${esc(d.llm_mode)}</b>：<br>
-        这一轮没有调用大模型，所以没有消耗 —— 不是"用了 0 token"，是<b>根本没发请求</b>。<br>
+        当前会话没有调用大模型，所以没有消耗 —— 不是"用了 0 token"，是<b>根本没发请求</b>。<br>
         换成 <code>LLM_MODE=deepseek</code> 再跑一次，这里就会出现每次调用的 token 明细。</div>`;
       return;
     }
@@ -969,12 +1001,12 @@ function renderInfo() {
 
     const calls = d.calls || [];
     if (!calls.length) {
-      h += `<div class="empty">这一轮没有消耗记录。<br>
+      h += `<div class="empty">当前会话没有消耗记录。<br>
         要么它没有调用过大模型，要么这次运行发生在「消耗统计」上线之前
         —— 老记录补不回来，重新跑一轮就有明细了。</div>`;
     } else {
       h += `<div class="use-sec">调用明细（${calls.length} 次，按发生顺序）</div>
-        <table class="grid"><thead><tr><th>#</th><th>智能体</th><th>在干什么</th><th>轮/子任务</th>
+        <table class="grid"><thead><tr><th>#</th><th>智能体</th><th>在干什么</th><th>对话轮次 / 修正 / 子任务</th>
         <th>模型</th><th>输入</th><th>输出</th><th>合计</th><th>缓存命中</th><th>耗时</th></tr></thead><tbody>`;
       calls.forEach((c) => {
         const okMark = c.ok === false ? ' <span style="color:#dc2626">✕</span>' : '';
@@ -983,7 +1015,7 @@ function renderInfo() {
           <td>${esc(A(c.role).cn)}</td>
           <td>${esc(c.stage || '—')}${c.attempt > 1 ? `<span class="tag">第 ${c.attempt} 次重试</span>` : ''}
             ${c.error ? `<div style="color:#dc2626;font-size:11px">${esc(clip(c.error, 90))}</div>` : ''}</td>
-          <td>第 ${(c.round ?? 0)+1} 轮 · c${esc(c.cursor ?? 0)}</td>
+          <td>第 ${esc(c.turn ?? 1)} 轮 · 修正 ${esc(c.round ?? 0)} · c${esc(c.cursor ?? 0)}</td>
           <td class="mono" style="font-size:11px">${esc(c.model || '—')}</td>
           <td>${fmtNum(c.prompt_tokens)}</td><td>${fmtNum(c.completion_tokens)}</td>
           <td><b>${fmtNum(c.total_tokens)}</b></td>
@@ -994,19 +1026,18 @@ function renderInfo() {
       h += `</tbody></table>`;
     }
 
-    /* 这里刻意**不做**「全部会话累计」：消耗清单回答的是"这一轮花了多少"，
-       把别的会话的账混进来，会让这一轮的数字看起来对不上（也容易让人以为贵的是这次）。 */
+    // 统计范围为当前会话的所有轮次。
     $('info-body').innerHTML = h;
     return;
   }
   if (store.infoMode === 'audit') {
-    $('info-title').textContent = 'SQL 审计';
+    $('info-title').textContent = '当前会话 · SQL 审计';
     $('info-hint').textContent = '每条 SQL 从生成到执行的全程留痕（存在 agent_sql 库）';
     if (!store.audit.length) { $('info-body').innerHTML = '<div class="empty">这次没有执行任何 SQL</div>'; return; }
     $('info-body').innerHTML = `<table class="grid"><thead><tr>
-      <th>轮</th><th>子任务</th><th>阶段</th><th>类型</th><th>风险</th><th>影响</th><th>确认人</th><th>SQL</th>
+      <th>对话轮次 / 修正</th><th>子任务</th><th>阶段</th><th>类型</th><th>风险</th><th>影响</th><th>确认人</th><th>SQL</th>
       </tr></thead><tbody>${store.audit.map((a)=>`<tr>
-      <td>${esc(a.round)}</td><td>${esc(a.sub_task_id)}</td><td><b>${esc(a.stage)}</b></td>
+      <td>第 ${esc(a.turn ?? 1)} 轮 / ${esc(a.round)}</td><td>${esc(a.sub_task_id)}</td><td><b>${esc(a.stage)}</b></td>
       <td>${esc(a.action||'-')}</td><td><span class="risk r-${esc(a.risk_level||'只读')}">${esc(a.risk_level||'-')}</span></td>
       <td>${a.affected_rows ?? '-'}</td><td>${esc(a.confirmed_by||'-')}</td>
       <td class="mono">${esc(clip(a.sql,90))}${a.error?`<div style="color:#dc2626">${esc(clip(a.error,80))}</div>`:''}</td>
@@ -1014,7 +1045,7 @@ function renderInfo() {
     return;
   }
   if (store.infoMode === 'flow') {
-    $('info-title').textContent = '数据流转链路';
+    $('info-title').textContent = '当前会话 · 数据流转链路';
     $('info-hint').textContent =
       '智能体之间每一次交接、流转的内容，以及护栏有没有改掉模型的建议（存 agent_event 表，可逐条回放）';
     if (!store.events.length) {
@@ -1025,7 +1056,7 @@ function renderInfo() {
     return;
   }
   // seq：协作时序图
-  $('info-title').textContent = '协作时序图';
+  $('info-title').textContent = '当前会话 · 协作时序图';
   $('info-hint').textContent = '链路不固定 —— 每个智能体自己建议下一步，护栏决定能不能去';
   $('info-body').innerHTML = `<div class="legend">
       <span><i></i>交接（谁把什么交给谁）</span>
@@ -1062,7 +1093,8 @@ function buildFlow() {
     const p = e.payload || {}, r = e.round ?? 0, role = e.role;
     switch (e.event_type) {
       case 'run_created':
-        steps.push({ kind:'start', question:p.question || '', tables:p.tables || [], raw:[e] });
+        cur = null;
+        steps.push({ kind:'start', question:`第 ${p.turn || store.runs[e.global_task_id]?.turn || 1} 轮对话 · ${p.question || ''}`, tables:p.tables || [], raw:[e] });
         break;
       case 'node_start':
         if (!cur || cur.from !== role || cur.round !== r) cur = { from:role, round:r, items:[], raw:[] };
@@ -1323,14 +1355,14 @@ function buildSequence() {
   for (const e of store.events) {
     const p = e.payload || {}, r = e.round ?? 0;
     if (e.event_type === 'run_created') {
-      steps.push({ kind:'band', label: clip(p.question || '开始', 64) });
+      steps.push({ kind:'band', label: `第 ${p.turn || store.runs[e.global_task_id]?.turn || 1} 轮对话 · ${clip(p.question || '开始', 64)}` });
       lastRound = 0;
       steps.push({ kind:'msg', from:0, to:1, tone:'ok', main:'提交问题',
                    sub:`系统目录 ${(p.tables||[]).length} 张表` });
       continue;
     }
     if (e.event_type === 'node_start' && r !== lastRound) {
-      steps.push({ kind:'band', label:`第 ${r+1} 轮` });
+      steps.push({ kind:'band', label:`修正轮次 ${r+1}` });
       lastRound = r;
     }
     if (e.event_type === 'plan') {
@@ -1600,7 +1632,7 @@ function buildUsageSvg(d) {
     { t:'智能体', v:(c) => A(c.role).cn },
     { t:'在干什么', v:(c) => (c.stage || '—') + (c.attempt > 1 ? `（第 ${c.attempt} 次重试）` : ''),
       v2:(c) => c.error || '', fill:(c) => (c.ok === false ? '#dc2626' : '#1f2937') },
-    { t:'轮/子任务', v:(c) => `第 ${(c.round ?? 0) + 1} 轮 · c${c.cursor ?? 0}` },
+    { t:'对话轮次 / 修正 / 子任务', v:(c) => `第 ${c.turn ?? 1} 轮 · 修正 ${c.round ?? 0} · c${c.cursor ?? 0}` },
     { t:'模型', v:(c) => c.model || '—' },
     { t:'输入', v:(c) => fmtNum(c.prompt_tokens), align:'right' },
     { t:'输出', v:(c) => fmtNum(c.completion_tokens), align:'right' },
@@ -1622,9 +1654,9 @@ function buildUsageSvg(d) {
 
   if (!calls.length) {
     const lines = d.llm_enabled
-      ? ['这一轮没有消耗记录 —— 要么它没有调用过大模型，',
+      ? ['当前会话没有消耗记录 —— 要么它没有调用过大模型，',
          '要么这次运行发生在「消耗统计」上线之前（老记录补不回来，重新跑一轮就有明细）。']
-      : [`当前是 LLM_MODE=${d.llm_mode || 'mock'}：这一轮没有调用大模型，所以没有消耗 ——`,
+      : [`当前是 LLM_MODE=${d.llm_mode || 'mock'}：当前会话没有调用大模型，所以没有消耗 ——`,
          '不是"用了 0 token"，是根本没发请求。'];
     lines.forEach((ln, i) => o.push(`<text x="${PAD}" y="${y + 18 + i * 20}" font-size="12.5" fill="#475569">${svgEsc(ln)}</text>`));
     y += 18 + lines.length * 20;
@@ -1859,9 +1891,27 @@ async function openInfo(mode) {
     renderInfo();                                   // 先渲染「加载中」
     if (!store.usageDetail && store.runId) {
       try {
-        store.usageDetail = await (await fetch(`/api/runs/${store.runId}/usage`)).json();
+        const conversationId = store.conversationId, runId = store.runId, epoch = store.sessionEpoch, calls = store.usage.calls;
+        const url = conversationId ? `/api/conversations/${conversationId}/usage` : `/api/runs/${runId}/usage`;
+        const detail = await (await fetch(url)).json();
+        if (store.sessionEpoch !== epoch || store.conversationId !== conversationId || store.runId !== runId) return;
+        if (store.usage.calls !== calls) return;
+        store.usageDetail = detail;
+        renderHeader();
       } catch (e) {}
     }
+  }
+  if (mode === 'audit' && store.conversationId) {
+    const conversationId = store.conversationId, epoch = store.sessionEpoch;
+    try {
+      const detail = await (await fetch(`/api/conversations/${conversationId}`)).json();
+      if (store.sessionEpoch !== epoch || store.conversationId !== conversationId) return;
+      for (const turn of detail.turns || []) {
+        store.runs[turn.global_task_id] = {turn:turn.turn, question:turn.question};
+        mergeRunRecords('audit', turn.global_task_id, turn.audit);
+        mergeRunRecords('tasks', turn.global_task_id, turn.tasks);
+      }
+    } catch (e) {}
   }
   renderInfo();
 }
@@ -1894,7 +1944,7 @@ document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeInf
 document.addEventListener('click', (ev) => {
   const t = ev.target;
   const c = t.dataset && t.dataset.confirm;
-  if (c !== undefined && c !== '') { decide(c === '1'); return; }
+  if (c !== undefined && c !== '') { decide(c === '1', t.dataset.confirmVersion, t.dataset.confirmHash); return; }
   const o = t.dataset && t.dataset.open;
   if (o) { openInfo(o); return; }
   const s = t.dataset && t.dataset.sample;

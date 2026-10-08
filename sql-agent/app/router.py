@@ -69,7 +69,7 @@ def decide(state: TaskState, max_rounds: int) -> tuple[str, str]:
     cursor = int(state.get("cursor", 0))
 
     # ---------- ⓪ 某个智能体没干成 —— 别再往下转，直接收尾给用户交代 ----------
-    if state.get("status") == "failed":
+    if state.get("status") in {"failed", "cancelled"}:
         return "reviewer", "有智能体未能完成工作，收尾并如实说明"
 
     # ---------- ⓪' 规划器判定「这个请求我不做」 ----------
@@ -110,7 +110,7 @@ def decide(state: TaskState, max_rounds: int) -> tuple[str, str]:
     #   · **这个位置还没复查过**（`replanned_cursor`）—— 不然复查完回来又满足前两条，
     #     就会在原地无限绕圈。
     # 还要求上一步是「执行成功」：失败该走修正/重新规划，不该当成"做完了"。
-    if (cursor > 0 and cursor < len(intents)
+    if (state.get("replan_after_success", False) and cursor > 0 and cursor < len(intents)
             and int(state.get("replanned_cursor", -1)) != cursor
             and (result or {}).get("ok")):
         return "planner", (f"子任务 {intents[cursor - 1].get('sub_task_id')} 已执行完成，"

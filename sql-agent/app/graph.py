@@ -28,7 +28,7 @@ from .db import BizDatabase
 from .ledger import Ledger
 from .llm import build_llm
 from .runtime import EventBus, Runtime
-from .state import TaskState
+from .state import TaskState, now_hash
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,8 @@ class Orchestrator:
             """路由节点：模型建议 + 运行时候选集 → 实际去哪。"""
             run_id = state["global_task_id"]
             want = state.get("next_agent")
-            nxt, reason = router.decide(state, rt.settings.max_rounds)
+            nxt, reason = router.decide({**state, "replan_after_success":
+                getattr(rt.settings, "replan_after_success", False)}, rt.settings.max_rounds)
             await rt.emit(
                 run_id, "router", "handoff",
                 {"from": state.get("last_agent"), "to": nxt,
@@ -263,30 +264,38 @@ class Orchestrator:
     def _config(self, run_id: str) -> dict:
         return {"configurable": {"thread_id": run_id}}
 
-    async def _drive(self, run_id: str, payload) -> bool:
-        """推进图。返回 True 表示「停在人工确认」。"""
+    async def _drive(self, run_id: str, payload) -> tuple[bool, dict]:
+        """推进图，同时捕获最终状态；无 checkpoint 也能结束普通任务。"""
         paused = False
-        async for chunk in self.graph.astream(payload, self._config(run_id), stream_mode="updates"):
+        values = {}
+        async for mode, chunk in self.graph.astream(
+                payload, self._config(run_id), stream_mode=["updates", "values"]):
+            if mode == "values":
+                values = chunk
+                continue
             interrupts = chunk.get("__interrupt__")
             if interrupts:
+                if self._saver is None:
+                    raise RuntimeError("需人工确认的 SQL 不可在无 checkpoint 模式执行")
                 paused = True
                 for item in interrupts:
                     await self._on_interrupt(run_id, getattr(item, "value", item) or {})
-        return paused
+        return paused, values
 
     async def _on_interrupt(self, run_id: str, value: dict) -> None:
         """把「等待人工确认」落账 —— 前端据此渲染确认按钮。"""
         run = await self.ledger.get_run(run_id)
         round_no = int((run or {}).get("round") or 0)
-        await self.rt.emit(run_id, "executor", "await_confirm",
-                           value, version=(run or {}).get("version", 0), round_no=round_no)
         await self.ledger.audit_sql(
             run_id, round_no, value.get("sub_task_id") or "", "await_confirm",
             value.get("sql") or "", "",
             intent=value.get("intent"), risk_level=value.get("risk_level"),
             action=value.get("action"), tables=value.get("tables") or [],
             est_rows=value.get("est_rows"), need_confirm=True)
-        await self.ledger.set_run_status(run_id, "confirming")
+        confirm_version = await self.ledger.set_run_status(run_id, "confirming")
+        await self.rt.emit(run_id, "executor", "await_confirm",
+                           {**value, "confirmation_version": confirm_version},
+                           version=confirm_version or 0, round_no=round_no)
 
     async def run(self, run_id: str) -> dict:
         run = await self.ledger.get_run(run_id)
@@ -309,47 +318,53 @@ class Orchestrator:
             "confirmed": False,
         }
         try:
-            paused = await self._drive(run_id, state)
+            paused, values = await self._drive(run_id, state)
         except Exception as exc:  # noqa: BLE001
             logger.exception("图执行失败：%s", run_id)
             await self._fail(run_id, str(exc))
             raise
         if paused:
             return {"status": "confirming"}
-        return await self._finish(run_id)
+        return await self._finish(run_id, values)
 
-    async def resume(self, run_id: str, approve: bool, by: str) -> dict:
+    async def resume(self, run_id: str, approve: bool, by: str, sql_hash: str) -> dict:
         """用户点了「确认执行 / 取消」之后，把决定送回图里继续跑。"""
         if self._saver is None:
             raise RuntimeError("人工确认依赖 checkpointer，请把 USE_CHECKPOINTER 设为 on")
-        snapshot = await self.graph.aget_state(self._config(run_id))
-        if not snapshot.next:
-            raise RuntimeError("这个任务当前没有在等待确认")
-        await self.rt.emit(run_id, "system", "confirmed",
-                           {"approve": approve, "by": by})
-        await self.ledger.set_run_status(run_id, "executing")
         try:
-            paused = await self._drive(run_id, Command(resume={"approve": approve, "by": by}))
+            snapshot = await self.graph.aget_state(self._config(run_id))
+            if not snapshot.next:
+                raise RuntimeError("这个任务当前没有在等待确认")
+            if sql_hash != now_hash((snapshot.values.get("draft") or {}).get("sql", "")):
+                raise RuntimeError("确认卡片与待执行 SQL 不匹配")
+            await self.rt.emit(run_id, "system", "confirmed",
+                               {"approve": approve, "by": by})
+            await self.ledger.set_run_status(run_id, "executing")
+            paused, values = await self._drive(run_id, Command(resume={
+                "approve": approve, "by": by,
+                "sql_hash": sql_hash}))
         except Exception as exc:  # noqa: BLE001
             logger.exception("恢复执行失败：%s", run_id)
             await self._fail(run_id, str(exc))
             raise
         if paused:
             return {"status": "confirming"}
-        return await self._finish(run_id)
+        return await self._finish(run_id, values)
 
-    async def _finish(self, run_id: str) -> dict:
+    async def _finish(self, run_id: str, values: dict | None = None) -> dict:
         config = self._config(run_id)
-        values = (await self.graph.aget_state(config)).values or {}
+        if values is None:
+            values = (await self.graph.aget_state(config)).values or {}
         status = values.get("status", "done")
         version = values.get("version", 0)
-        reason = ("审查通过，且运行时一致性校验全部 pass" if status == "done"
+        reason = ("用户取消了执行，未完成的任务没有继续执行" if status == "cancelled" else
+                  "审查通过，且运行时一致性校验全部 pass" if status == "done"
                   else "存在未通过的一致性问题，已如实说明")
         await self.rt.emit(run_id, "system", "done",
                            {"status": status, "reason": reason,
                             "round": values.get("round", 0),
                             "consistency_passed": bool(
-                                (values.get("last_consistency") or {}).get("passed", status == "done"))},
+                                (values.get("last_consistency") or {}).get("passed", False))},
                            version=version, round_no=values.get("round", 0))
         return values
 
@@ -386,7 +401,7 @@ async def build_orchestrator(settings: Settings, reset: bool = False):
             await saver.setup()
             logger.info("LangGraph Postgres checkpoint 已就绪（agent_sql）")
         except Exception as exc:  # noqa: BLE001
-            logger.warning("checkpoint 初始化失败，人工确认将不可用：%s", exc)
+            logger.error("checkpoint 初始化失败，停止启动：%s", exc)
             saver = None
             if saver_cm is not None:
                 try:
@@ -394,6 +409,8 @@ async def build_orchestrator(settings: Settings, reset: bool = False):
                 except Exception:  # noqa: BLE001
                     pass
                 saver_cm = None
+            await orch.close()
+            raise RuntimeError("checkpoint 初始化失败，不能启动恢复模式") from exc
     else:
         logger.warning("USE_CHECKPOINTER=off：需人工确认的 SQL 将无法执行")
 

@@ -1,0 +1,35 @@
+test_builtin_calls_are_bound_before_display_and_execution (__main__.Reliability.test_builtin_calls_are_bound_before_display_and_execution) ... ok
+test_cancel_is_not_success_or_downstream_progress (__main__.Reliability.test_cancel_is_not_success_or_downstream_progress) ... ok
+test_changed_sql_requires_new_validation (__main__.Reliability.test_changed_sql_requires_new_validation) ... ok
+test_checkpoint_initialization_failure_stops_startup_and_closes_resources (__main__.Reliability.test_checkpoint_initialization_failure_stops_startup_and_closes_resources) ... ok
+test_complete_mock_graph_without_checkpoint (__main__.Reliability.test_complete_mock_graph_without_checkpoint) ... 2026-10-08 09:59:06,938 INFO app.graph: LangGraph 已编译（checkpointer=False）
+ok
+test_confirmation_for_different_sql_is_rejected (__main__.Reliability.test_confirmation_for_different_sql_is_rejected) ... ok
+test_confirmed_boolean_cannot_bypass_human_decision (__main__.Reliability.test_confirmed_boolean_cannot_bypass_human_decision) ... ok
+test_correct_sql_confirmation_executes_once (__main__.Reliability.test_correct_sql_confirmation_executes_once) ... ok
+test_duplicate_confirmation_is_rejected (__main__.Reliability.test_duplicate_confirmation_is_rejected) ... ok
+test_duplicate_start_is_rejected (__main__.Reliability.test_duplicate_start_is_rejected) ... ok
+test_executor_rechecks_sql_before_database_access (__main__.Reliability.test_executor_rechecks_sql_before_database_access) ... ok
+test_failed_execution_does_not_satisfy_coverage (__main__.Reliability.test_failed_execution_does_not_satisfy_coverage) ... ok
+test_fixer_retry_settles_same_round_identity (__main__.Reliability.test_fixer_retry_settles_same_round_identity) ... ok
+test_full_graph_cancel_remains_cancelled (__main__.Reliability.test_full_graph_cancel_remains_cancelled) ... 2026-10-08 09:59:07,146 INFO app.graph: LangGraph 已编译（checkpointer=True）
+ok
+test_invalid_syntax_fails_closed (__main__.Reliability.test_invalid_syntax_fails_closed) ... ok
+test_legacy_memory_claim_is_not_presented_as_database_fact (__main__.Reliability.test_legacy_memory_claim_is_not_presented_as_database_fact) ... ok
+test_memory_preserves_completeness_and_separates_model_claim (__main__.Reliability.test_memory_preserves_completeness_and_separates_model_claim) ... ok
+test_missing_resume_checkpoint_is_recorded_failed (__main__.Reliability.test_missing_resume_checkpoint_is_recorded_failed) ... ok
+test_no_checkpoint_cannot_pause_for_confirmation (__main__.Reliability.test_no_checkpoint_cannot_pause_for_confirmation) ... ok
+test_no_checkpoint_finish_uses_stream_values (__main__.Reliability.test_no_checkpoint_finish_uses_stream_values) ... ok
+test_planner_settles_claimed_identity (__main__.Reliability.test_planner_settles_claimed_identity) ... ok
+test_quoted_unauthorized_tables_and_cte_scope_are_rejected (__main__.Reliability.test_quoted_unauthorized_tables_and_cte_scope_are_rejected) ... ok
+test_read_cte_and_upsert_remain_available (__main__.Reliability.test_read_cte_and_upsert_remain_available) ... ok
+test_readonly_transaction_blocks_write_without_poisoning_next_transaction (__main__.Reliability.test_readonly_transaction_blocks_write_without_poisoning_next_transaction) ... ok
+test_rejected_validation_blocks_final_report (__main__.Reliability.test_rejected_validation_blocks_final_report) ... ok
+test_stale_confirmation_cannot_approve_next_pause (__main__.Reliability.test_stale_confirmation_cannot_approve_next_pause) ... ok
+test_unapproved_function_rejected (__main__.Reliability.test_unapproved_function_rejected) ... ok
+test_writable_ctes_rejected_including_nested_and_quoted (__main__.Reliability.test_writable_ctes_rejected_including_nested_and_quoted) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 0.488s
+
+OK

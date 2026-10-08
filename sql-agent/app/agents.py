@@ -240,6 +240,13 @@ def _entities_from(exec_result: dict, tables: list[str]) -> dict:
     return {}
 
 
+def _fact_claim(mem: dict) -> str:
+    """读取边界重新构造证据说明；旧 DB/checkpoint 的 claim 也不能冒充事实。"""
+    if mem.get("stage") != "executed" or not mem.get("verified") or not mem.get("sql_id"):
+        return "缺少可核对的成功执行来源，不作为已确认事实"
+    return f"数据库执行成功，返回/影响 {mem.get('rowcount', '未知')} 行"
+
+
 def _render_fact(mem: dict) -> str:
     """把一条共享记忆渲染成「带来源的事实」。
 
@@ -248,6 +255,8 @@ def _render_fact(mem: dict) -> str:
     """
     ent = mem.get("entities") or {}
     body = ""
+    if mem.get("truncated", True) or mem.get("sampled", True):
+        body += "      完整性：结果被截断或仅保存样本，不能当作全部数据。\n"
     values = ent.get("values") or []
     if ent.get("key") and values:
         shown = "、".join(str(v) for v in values[:50])
@@ -262,7 +271,7 @@ def _render_fact(mem: dict) -> str:
     sql = (mem.get("sql_text") or "").replace("\n", " ")
     return prompts.FACT_ITEM.format(
         sub_task_id=mem.get("sub_task_id", "?"),
-        claim=mem.get("claim") or "",
+        claim=_fact_claim(mem),
         sql=sql[:160] + ("…" if len(sql) > 160 else ""),
         result_desc=_result_desc(mem),
         entity_lines=body,
@@ -299,7 +308,8 @@ def _handoff(state, rt, intent: dict) -> str:
     sid = intent.get("sub_task_id") or "?"
     deps = [d for d in (intent.get("depends_on") or []) if d]
     done_ids = [h.get("sub_task_id") for h in (state.get("history") or [])
-                if h.get("executed") and h.get("sub_task_id") != sid]
+                if h.get("executed") and h.get("exec_ok") is True
+                and h.get("kind") != "cancelled" and h.get("sub_task_id") != sid]
     want = deps or done_ids
 
     mems = [m for m in (state.get("memory") or []) if m.get("sub_task_id") in want]
@@ -332,11 +342,10 @@ def _handoff(state, rt, intent: dict) -> str:
 async def planner(state, rt) -> dict:
     run_id = state["global_task_id"]
     version = state.get("version", 0)
-    sub_task_id = f"planner-r{state.get('round', 0)}-c0"
+    sub_task_id = await _claim(rt, state, "planner", "plan")
 
     await rt.emit(run_id, "planner", "node_start",
                   {"role": "planner", "sub_task_id": sub_task_id}, version=version)
-    await _claim(rt, state, "planner", "plan")
 
     system = prompts.PLANNER_SYSTEM
 
@@ -442,7 +451,8 @@ async def planner(state, rt) -> dict:
             # 游标**按「哪几个子任务真的执行过」重算**，不按模型给的列表形状。
             # （模型要是只把剩下的任务还回来，直接沿用旧游标就会错位。）
             done_ids = {h.get("sub_task_id") for h in (state.get("history") or [])
-                        if h.get("executed")}
+                        if h.get("executed") and h.get("exec_ok") is True
+                        and h.get("kind") != "cancelled"}
             cursor = next((i for i, it in enumerate(intents)
                            if it.get("sub_task_id") not in done_ids), len(intents))
             # 计划变了，上一版 SQL 就对不上当前子任务了 —— 必须清掉，
@@ -544,18 +554,17 @@ async def generator(state, rt) -> dict:
         question=state.get("question", ""),
         sub_task_id=intent.get("sub_task_id"), intent=intent.get("intent"),
         kind=intent.get("kind"), tier1=catalog.tier1_text())
-    pick, _, pick_err = await _call(
-        rt, TableFilterOutput, filter_system, filter_user,
-        lambda: mock_llm.mock_table_filter(intent, rt.allowed_tables),
-        ctx=_ctx(state, "generator", "第一层·选表"))
-    if pick_err is not None or pick is None:
-        # 选表失败不致命：退化成「按关系铺开全部表」，让第二步照常走
-        picked = catalog.names()
-        pick_reason = f"选表步骤失败（{pick_err}），退化为使用全部表"
-    else:
-        # 按表关系补齐直接相连的表，保证 JOIN 走得通
-        picked = catalog.connected(pick.tables) or catalog.names()
-        pick_reason = pick.reason
+    pick_reason = "目录较小，直接根据表结构生成，不增加选表模型调用"
+    if len(picked) > getattr(rt.settings, "table_filter_threshold", 20):
+        pick, _, pick_err = await _call(
+            rt, TableFilterOutput, filter_system, filter_user,
+            lambda: mock_llm.mock_table_filter(intent, rt.allowed_tables),
+            ctx=_ctx(state, "generator", "第一层·选表"))
+        if pick_err is not None or pick is None:
+            pick_reason = f"选表步骤失败（{pick_err}），退化为使用全部表"
+        else:
+            picked = catalog.connected(pick.tables) or catalog.names()
+            pick_reason = pick.reason
 
     detail = catalog.detail_text(picked)
     await rt.emit(run_id, "generator", "tables",
@@ -585,6 +594,8 @@ async def generator(state, rt) -> dict:
     # 于是"把不存在的表换成另一张同构表"在运行时层就被挡住
     draft["tables"] = picked
     v = sql_guard.analyze(draft["sql"], rt.allowed_tables)
+    if v.ok and v.normalized_sql:
+        draft["sql"] = v.normalized_sql
     verdict = {"level": v.level, "action": v.action, "tables": v.tables,
                "reasons": v.reasons, "notes": v.notes, "statements": v.statements,
                "needs_confirm": v.needs_confirm}
@@ -683,12 +694,17 @@ async def validator(state, rt) -> dict:
         sql=sql,
         detail=catalog.detail_text(draft.get("tables")),
         runtime_checks=_dump(runtime_checks))
-    out, attempts, err = await _call(
-        rt, ValidatorOutput, system, user,
-        lambda: mock_llm.mock_validator(v, runtime_checks, intent),
-        ctx=_ctx(state, "validator", "校验 SQL"))
-    if err is not None or out is None:
-        return await _degrade(rt, state, "validator", sub_task_id, version, err)
+    if runtime_passed and getattr(rt.settings, "semantic_review", False):
+        out, attempts, err = await _call(
+            rt, ValidatorOutput, system, user,
+            lambda: mock_llm.mock_validator(v, runtime_checks, intent),
+            ctx=_ctx(state, "validator", "可选语义复核"))
+        if err is not None or out is None:
+            return await _degrade(rt, state, "validator", sub_task_id, version, err)
+    else:
+        out = ValidatorOutput(passed=runtime_passed, checks=[],
+                              reason="程序门禁通过；人工确认由执行器负责" if runtime_passed else "程序门禁未通过")
+        attempts = 1
 
     attempt = await _settle_attempts(rt, state, "validator", "validate", attempts)
 
@@ -698,6 +714,7 @@ async def validator(state, rt) -> dict:
     forced = (not runtime_passed) and bool(out.passed)
     checks = {
         "passed": passed,
+        "sql_hash": now_hash(sql),
         "forced_by_runtime": forced,
         "reason": out.reason or ("运行时检查未通过" if not runtime_passed else "校验通过"),
         "checks": runtime_checks + model_checks,
@@ -756,6 +773,18 @@ async def executor(state, rt) -> dict:
     sql = draft.get("sql", "")
     verdict = state.get("verdict") or {}
 
+    # 执行边界重新计算风险，防止旧 verdict/损坏状态绕过静态防线。
+    fresh = sql_guard.analyze(sql, rt.allowed_tables)
+    verdict = {"level": fresh.level, "action": fresh.action, "tables": fresh.tables,
+               "needs_confirm": fresh.needs_confirm, "notes": fresh.notes, "reasons": fresh.reasons}
+    checks = state.get("checks") or {}
+    if (fresh.level == "禁止" or fresh.normalized_sql != sql.strip()
+            or not checks.get("passed")
+            or checks.get("sql_hash") != now_hash(sql)):
+        return {"verdict": verdict, "status": "failed", "last_agent": "executor",
+                "next_agent": "reviewer", "result": {"ok": False, "kind": "blocked",
+                "summary": "执行门禁拒绝：SQL 风险或校验未通过"}}
+
     # ============ 执行器是**唯一**访问数据库的智能体 ============
     #
     # 第 ① 步：EXPLAIN —— 不执行语句，只让 PostgreSQL 做完整的语法与语义分析。
@@ -805,13 +834,13 @@ async def executor(state, rt) -> dict:
     # ============ 人工协作：需确认的操作，先暂停 ============
     # interrupt 之前的代码在恢复后**会重跑**，所以这里刻意不做任何副作用 ——
     # 「等待确认」的事件与审计由编排器在捕获 __interrupt__ 时统一落账。
-    if (bool(verdict.get("needs_confirm")) or verdict.get("level") == "需确认") \
-            and not state.get("confirmed"):
+    if bool(verdict.get("needs_confirm")) or verdict.get("level") == "需确认":
         decision = interrupt({
             "type": "confirm_sql",
             "sub_task_id": draft.get("sub_task_id"),
             "intent": draft.get("intent"),
             "sql": sql,
+            "sql_hash": now_hash(sql),
             "risk_level": verdict.get("level"),
             "action": verdict.get("action"),
             "tables": verdict.get("tables"),
@@ -823,18 +852,20 @@ async def executor(state, rt) -> dict:
         approved = (bool(decision.get("approve")) if isinstance(decision, dict)
                     else decision == "approve")
         approved_by = (decision or {}).get("by") if isinstance(decision, dict) else None
+        if approved and (not isinstance(decision, dict) or decision.get("sql_hash") != now_hash(sql)):
+            raise RuntimeError("确认记录与当前 SQL 不匹配，必须重新确认")
         if not approved:
             intents = list(state.get("intents") or [])
             cursor = int(state.get("cursor", 0))
-            return {"result": {"ok": True, "kind": "cancelled", "rowcount": 0,
+            return {"result": {"ok": False, "kind": "cancelled", "rowcount": 0,
                                "summary": "用户取消了执行"},
                     "confirmed": False,
-                    "cursor": min(cursor + 1, len(intents)),
-                    "history": _upsert_history(state, executed=True, exec_ok=True,
+                    "cursor": cursor,
+                    "history": _upsert_history(state, executed=False, exec_ok=None,
                                                kind="cancelled", affected_rows=0,
                                                confirmed_by=approved_by,
                                                note="用户取消了执行"),
-                    "status": "executing", "last_agent": "executor",
+                    "status": "cancelled", "last_agent": "executor",
                     "next_agent": "reviewer"}
     else:
         approved_by = None
@@ -846,7 +877,8 @@ async def executor(state, rt) -> dict:
                    "risk_level": verdict.get("level")}, version=version, round_no=round_no)
     await _claim(rt, state, "executor", "execute")
 
-    exec_result = await rt.db.execute(sql, max_rows=rt.settings.max_rows)
+    exec_result = await rt.db.execute(sql, max_rows=rt.settings.max_rows,
+                                      read_only=verdict.get("level") == "只读")
     attempts = 1
     await rt.ledger.finish_task(
         run_id, sub_task_id, attempts, "completed" if exec_result["ok"] else "failed",
@@ -868,19 +900,11 @@ async def executor(state, rt) -> dict:
     await rt.emit(run_id, "executor", "result", exec_result,
                   version=version, round_no=round_no)
 
-    # ⑤ 让模型点评一下执行结果（是否真的完成了意图）
-    system = prompts.EXECUTOR_SYSTEM
-    user = prompts.EXECUTOR_USER.format(
-        intent=draft.get("intent"), sql=sql,
-        result=_dump({k: val for k, val in exec_result.items() if k != "rows"}),
-        rowcount=exec_result.get("rowcount"),
-        sample=_dump((exec_result.get("rows") or [])[:3]))
-    out, _, err = await _call(rt, ExecutorOutput, system, user,
-                              lambda: mock_llm.mock_executor(exec_result),
-                              ctx=_ctx(state, "executor", "点评执行结果"))
-    if out is None:
-        out = ExecutorOutput(ok=exec_result["ok"],
-                             summary="执行完成" if exec_result["ok"] else "执行失败")
+    # 执行结果由数据库给出，不再让模型点评每次成功/失败。
+    out = ExecutorOutput(ok=exec_result["ok"],
+                         summary=(f"数据库执行成功，返回/影响 {exec_result.get('rowcount')} 行"
+                                  if exec_result["ok"] else "执行失败：" + str(exec_result.get("error") or "未知错误")),
+                         error_hint=str(exec_result.get("error") or ""))
 
     entry_lifecycle = dict(
         executed=True, exec_ok=exec_result["ok"],
@@ -895,6 +919,7 @@ async def executor(state, rt) -> dict:
         entry_lifecycle["columns"] = exec_result.get("columns") or []
         entry_lifecycle["rows"] = (exec_result.get("rows") or [])[:50]
         entry_lifecycle["truncated"] = bool(exec_result.get("truncated"))
+        entry_lifecycle["sampled"] = len(exec_result.get("rows") or []) > 50
 
     # ⑥ 写**共享记忆** —— 这一步是「连续性」的落点。
     #
@@ -903,7 +928,7 @@ async def executor(state, rt) -> dict:
     # 来源（sql_id + 原文）一并存下 —— 文档要求「不能取代权威数据源」，要核对能回去。
     memory = list(state.get("memory") or [])
     if exec_result["ok"]:
-        claim = (out.summary or "").strip() or f"{draft.get('intent') or '本步'}"
+        claim = f"数据库执行成功，返回/影响 {exec_result.get('rowcount')} 行"
         mem = {
             "sub_task_id": draft.get("sub_task_id") or "",
             "claim": f"{draft.get('intent') or '本步'} —— {claim}",
@@ -916,13 +941,19 @@ async def executor(state, rt) -> dict:
             "columns": exec_result.get("columns") or [],
             "rows": (exec_result.get("rows") or [])[:50],
             "rowcount": exec_result.get("rowcount"),
+            "truncated": bool(exec_result.get("truncated")),
+            "sampled": len(exec_result.get("rows") or []) > 50,
+            "interpretation": out.summary or "",
+            "interpretation_verified": False,
         }
         await rt.ledger.save_memory(
             run_id, mem["sub_task_id"], mem["claim"],
             sql_id=exec_sql_id, sql_text=sql, action=mem["action"],
             stage="executed", verified=True, entities=mem["entities"],
             columns=mem["columns"], rows=mem["rows"],
-            rowcount=mem["rowcount"], round_no=round_no)
+            rowcount=mem["rowcount"], round_no=round_no,
+            truncated=mem["truncated"], sampled=mem["sampled"],
+            interpretation=mem["interpretation"], interpretation_verified=False)
         # 读回最新的记忆列表，交给下游 —— 不额外查库，就这一条
         memory = await rt.ledger.list_memory(run_id)
         await rt.emit(run_id, "executor", "memory",
@@ -964,19 +995,20 @@ async def executor(state, rt) -> dict:
 # ---------------------------------------------------------------- 修正智能体
 
 async def fixer(state, rt) -> dict:
+    # 本次修正的节点身份、重试和模型上下文统一使用新 round。
+    state = {**state, "round": int(state.get("round", 0)) + 1}
     run_id = state["global_task_id"]
     version = state.get("version", 0)
-    round_no = int(state.get("round", 0)) + 1
+    round_no = int(state.get("round", 0))
     draft = state.get("draft") or {}
     checks = state.get("checks") or {}
     result = state.get("result") or {}
     intent = _current_intent(state)
-    sub_task_id = f"fixer-r{round_no}-c{state.get('cursor', 0)}"
+    sub_task_id = await _claim(rt, state, "fixer", "fix")
 
     await rt.emit(run_id, "fixer", "node_start",
                   {"role": "fixer", "sub_task_id": sub_task_id,
                    "from_round": round_no - 1}, version=version, round_no=round_no)
-    await _claim(rt, state, "fixer", "fix")
 
     failed = [c for c in (checks.get("checks") or []) if c.get("result") == "fail"]
     # 把**已经试过并失败的 SQL**一并给它 —— 否则它会一遍遍生成类似的东西，
@@ -1028,6 +1060,8 @@ async def fixer(state, rt) -> dict:
     # 于是"把不存在的表换成另一张同构表"在运行时层直接被判越权
     new_draft["tables"] = list(draft.get("tables") or [])
     v = sql_guard.analyze(new_draft["sql"], rt.allowed_tables)
+    if v.ok and v.normalized_sql:
+        new_draft["sql"] = v.normalized_sql
     verdict = {"level": v.level, "action": v.action, "tables": v.tables,
                "reasons": v.reasons, "notes": v.notes, "statements": v.statements,
                "needs_confirm": v.needs_confirm}
@@ -1099,8 +1133,9 @@ async def reviewer(state, rt) -> dict:
                   "复查结论": state.get("plan_note") or None,
                   "intents": state.get("intents") or []}
     # 共享记忆：每条都带 sql_id 与来源原文 —— 答复要「基于谁的结果」时就有据可依
-    memory_brief = [{"sub_task_id": m.get("sub_task_id"), "claim": m.get("claim"),
+    memory_brief = [{"sub_task_id": m.get("sub_task_id"), "claim": _fact_claim(m),
                      "sql_id": m.get("sql_id"), "rowcount": m.get("rowcount"),
+                     "truncated": m.get("truncated", True), "sampled": m.get("sampled", True),
                      "sql": m.get("sql_text")}
                     for m in (state.get("memory") or [])]
     user = prompts.REVIEWER_USER.format(
@@ -1132,7 +1167,8 @@ async def reviewer(state, rt) -> dict:
             reason="运行时一致性校验未通过，已强制否决（模型原本给出 approve）。",
         )
 
-    status = "done" if out.decision == "approve" else "failed"
+    status = ("cancelled" if state.get("status") == "cancelled" else
+              "done" if out.decision == "approve" else "failed")
     await rt.ledger.finish_task(run_id, sub_task_id, attempt, "completed",
                                 result_ref=f"review:{out.decision}")
     new_version = await rt.ledger.set_run_status(run_id, status) or version
@@ -1147,4 +1183,5 @@ async def reviewer(state, rt) -> dict:
                   version=new_version, round_no=round_no)
 
     return {"status": status,
-            "version": new_version, "last_agent": "reviewer", "next_agent": "done"}
+            "version": new_version, "last_agent": "reviewer", "next_agent": "done",
+            "last_consistency": report.model_dump()}
